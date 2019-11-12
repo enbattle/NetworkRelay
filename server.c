@@ -15,10 +15,21 @@
 
 //keeps track of the index of the client socket
 typedef struct {
-  int i;
+	int i;
 } Index;
 
+typedef struct BaseStation BaseStation;
 
+struct BaseStation{
+	char* id;
+	int x;
+	int y;
+	int num_links;
+	char** links;
+};
+
+void generateBaseStations(const char* baseStationFile);
+void readStdin();
 void* listenForConnections(void* p);
 void* handleSensor(void* p);
 
@@ -26,75 +37,66 @@ fd_set readfds; //keeps track of the sockets that 'select will listen for'
 unsigned short controlPort;
 int client_sockets[ MAX_STATIONS ]; /* client socket fd list */
 int client_socket_index = 0;  /* next free spot */
-
+BaseStation* base_stations; //keeps track of all the base stations
 pthread_mutex_t lock;
 
 int main(int argc, char* argv[]) {
+	// setvbuf for the buffer (for submitty)
+	setvbuf(stdout, NULL, _IONBF, 0);
+
 	// Check for correct number of command line arguments
 	if(argc != 3) {
 		fprintf(stderr, "ERROR: Invalid Arguments/Invalid Number of Arguments\n");
 		return EXIT_FAILURE;
 	}
 
-	// setvbuf for the buffer
-	setvbuf(stdout, NULL, _IONBF, 0);
-
-	int i;
-	int j;
-	int k;
-
-	// Control port argument and base station file argument
 	controlPort = atoi(argv[1]);
 	const char* baseStationFile = argv[2];
 
+	generateBaseStations(baseStationFile);
+
+	//initialize the mutex
+	if (pthread_mutex_init(&lock, NULL) != 0) { 
+	  perror("\n mutex init has failed\n"); 
+	  return 1; 
+	} 
+
+
+    pthread_t tid;
+    pthread_create(&tid, NULL, listenForConnections, NULL);
+    readStdin();
+
+	return EXIT_SUCCESS;
+}
+
+void generateBaseStations(const char* baseStationFile){
 	//PARSING BASE STATION FILE-------------------------------------------
 
 	// Try to open file and extract necessary information
 	FILE *file = fopen(baseStationFile, "r");
 	if(file == NULL) {
 		fprintf(stderr, "ERROR: File could not be found/opened!\n");
-		return EXIT_FAILURE;
+		exit(1);
 	}
 
 	// Print base station found
 	printf("Found base station file: %s\n", baseStationFile);
 
-	// Initialize the base station characteristic arrays
-		// for easier access of data
-	char** baseStations = (char**)calloc(MAX_STATIONS, sizeof(char*));
-	for(i=0; i<MAX_STATIONS; i++) {
-		baseStations[i] = (char*)calloc(MAX_STATION_LENGTH, sizeof(char));
+	//Get the number of stations (number of lines in file)
+	int num_stations = 0;
+	char* line = NULL;
+	size_t _len = 0;
+	ssize_t line_len;
+
+	while ((line_len = getline(&line, &_len, file)) != -1) {
+		num_stations++;
 	}
+	printf("%d stations\n", num_stations);
+	base_stations = calloc(num_stations, sizeof(BaseStation));
 
-	int** stationCoordinates = (int**)calloc(MAX_STATIONS, sizeof(int*));
-	for(i=0; i<MAX_STATIONS; i++) {
-		stationCoordinates[i] = (int*)calloc(2, sizeof(int));
-	}
-
-	int* stationNumLinks = (int*)calloc(MAX_STATIONS, sizeof(int));
-
-	char*** stationLinks = (char***)calloc(MAX_STATIONS, sizeof(char**));
-	for(i=0; i<MAX_STATIONS; i++) {
-		stationLinks[i] = (char**)calloc(MAX_LINKS, sizeof(char*));
-		for(j=0; j<MAX_LINKS; j++) {
-			stationLinks[i][j] = (char*)calloc(MAX_LINKS, sizeof(char));
-		}
-	}
-
-	// Keep track of the number of stations
-	int numOfStations = 0;
-
-	// Counters for each of the station characteristic arrays
-	int stationsCounter = 0;
-	int coordinatesCounter = 0;
-	int numLinksCounter = 0;
-	int linksCounter = 0;
-
-	char line[MAX_BUFFER];
-	while(fgets(line, MAX_BUFFER, file) != NULL) {
-		printf("The line is: %s\n", line);
-
-		numOfStations++;
+	rewind(file); //resets the pointer to beginning of file
+	num_stations = 0;
+	while((line_len = getline(&line, &_len, file)) != -1) {
 
 		// Counter to indicate current value parsed in the file
 		// 0 --- Base ID
@@ -107,65 +109,50 @@ int main(int argc, char* argv[]) {
 		// Run through each line from file, splitting by a space delimiter
 		char* token = strtok(line, " ");
 		while(token != NULL) {
-			printf("%s\n", token);
 			if(value == 0) {
-				strcpy(baseStations[stationsCounter++], token);
-				value = 1;
+				base_stations[num_stations].id = calloc(strlen(token) + 1, sizeof(char));
+				strcpy(base_stations[num_stations].id, token);
 			}
 			else if(value == 1) {
-				char x_pos[MAX_NUM_LENGTH];
-				strcpy(x_pos, token);
-				stationCoordinates[coordinatesCounter][0] = atoi(x_pos);
-				value = 2;
+				sscanf(token, "%d", &(base_stations[num_stations].x));  
 			}
 			else if(value == 2) {
-				char y_pos[MAX_NUM_LENGTH];
-				strcpy(y_pos, token);
-				stationCoordinates[coordinatesCounter++][1] = atoi(y_pos);
-				value = 3;
+				sscanf(token, "%d", &(base_stations[num_stations].y));  
 			}
 			else if(value == 3) {
-				char links[MAX_NUM_LENGTH];
-				strcpy(links, token);
-				stationNumLinks[numLinksCounter++] = atoi(links);
-				value = 4;
+				sscanf(token, "%d", &(base_stations[num_stations].num_links)); 
+				base_stations[num_stations].links = calloc(base_stations[num_stations].num_links, sizeof(char*)); 
 			}
 			else if(value == 4) {
-				int temporaryLinkCounter = 0;
-				while(token != NULL) {
-					strcpy(stationLinks[linksCounter][temporaryLinkCounter++], token);
+				for(int i = 0; i < base_stations[num_stations].num_links; i++){
+					base_stations[num_stations].links[i] = calloc(strlen(token) + 1, sizeof(char));
+					strcpy(base_stations[num_stations].links[i], token);
 					token = strtok(NULL, " ");
 				}
-				linksCounter++;
 			}
+			value++;
 			token = strtok(NULL, " ");
-		}		
+		}
+		num_stations++;		
 	}
 
-	// Debugging statement to make sure file was read in correctly
-	for(i=0; i<numOfStations; i++) {
-		printf("Station: %s\n", baseStations[i]);
-		printf("Station Coordinates: (%d, %d)\n", stationCoordinates[i][0], 
-			stationCoordinates[i][1]);
-		printf("Number of links: %d\n", stationNumLinks[i]);
-		printf("Links:\n");
-		for(j=0; j<stationNumLinks[i]; j++) {
-			printf("\t %s\n", stationLinks[i][j]);
+	// //Print out all the base stations for debugging
+	for(int i = 0; i < num_stations; i++){
+		BaseStation b = base_stations[i];
+		printf("id: %s\n", b.id);
+		printf("x: %d\n", b.x);
+		printf("y: %d\n", b.y);
+		printf("num_links: %d\n", b.num_links);
+		for(int j = 0; j < b.num_links; j++){
+			printf(" %s\n", b.links[j]);
 		}
 		printf("\n");
 	}
 
 	fclose(file);
+}
 
-	//initialize the mutex
-	if (pthread_mutex_init(&lock, NULL) != 0) { 
-	  perror("\n mutex init has failed\n"); 
-	  return 1; 
-	} 
-
-    pthread_t tid;
-    pthread_create(&tid, NULL, listenForConnections, NULL);
-
+void readStdin(){
     char stdin_buffer[MAX_BUFFER];
     int num_bytes = 0;
 
@@ -174,25 +161,19 @@ int main(int argc, char* argv[]) {
 		stdin_buffer[strcspn(stdin_buffer, "\n")] = 0; //remove newline from stdin_buffer
 		num_bytes = strlen(stdin_buffer);
 		printf("Read %s from stdin, %d bytes\n", stdin_buffer, num_bytes);
+
+		if(strstr(stdin_buffer,"SENDDATA") != NULL){
+
+			printf("MAIN: recieved SENDDATA command\n");
+
+		}else if(strstr(stdin_buffer,"QUIT") != NULL){
+
+			printf("MAIN: recieved QUIT command\n");
+
+		}
+
 		memset(stdin_buffer, 0, MAX_BUFFER);  
 	}
-
-
-	// Freeing the allocated memory
-	for(i=0; i<MAX_STATIONS; i++) {
-		free(baseStations[i]);
-		free(stationCoordinates[i]);
-		for(j=0; j<MAX_LINKS; j++) {
-			free(stationLinks[i][j]);
-		}
-		free(stationLinks[i]);
-	}
-	free(baseStations);
-	free(stationCoordinates);
-	free(stationNumLinks);
-	free(stationLinks);
-
-	return EXIT_SUCCESS;
 }
 
 void* listenForConnections(void* p){
