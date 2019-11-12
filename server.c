@@ -12,6 +12,8 @@
 #define MAX_LINKS 512
 #define MAX_STATION_LENGTH 512
 
+fd_set readfds; //keeps track of the sockets that 'select will listen for'
+
 int main(int argc, char* argv[]) {
 	// Check for correct number of command line arguments
 	if(argc != 3) {
@@ -30,8 +32,7 @@ int main(int argc, char* argv[]) {
 	unsigned short controlPort = atoi(argv[1]);
 	const char* baseStationFile = argv[2];
 
-	// Print running port
-	printf("Running on port: %d\n", controlPort);
+	//PARSING BASE STATION FILE-------------------------------------------
 
 	// Try to open file and extract necessary information
 	FILE *file = fopen(baseStationFile, "r");
@@ -140,6 +141,58 @@ int main(int argc, char* argv[]) {
 	}
 
 	fclose(file);
+
+	//SETTTING UP TCP SERVER----------------------------------------------
+
+	//Creating listener socket
+  	int sd = socket( PF_INET, SOCK_STREAM, 0 );
+  	if ( sd < 0 )
+  	{
+  	  perror( "ERROR: tcp socket() failed" );
+  	  exit( EXIT_FAILURE );
+  	}
+
+  	struct sockaddr_in server;
+  	struct sockaddr_in client;
+	server.sin_family = PF_INET;
+	server.sin_addr.s_addr = INADDR_ANY;
+	server.sin_port = htons( controlPort );
+	int len = sizeof( server );
+
+	//bind the server to the port
+	if ( bind( sd, (struct sockaddr *)&server, len ) < 0 )
+	{
+	  perror( "ERROR: tcp bind() failed" );
+	  exit( EXIT_FAILURE );
+	}
+
+	//listen on port
+	if ((listen(sd, 5)) != 0) { 
+	    printf("Listen failed...\n"); 
+	    exit(0); 
+	} 
+	else
+	    printf("Server: listening for TCP connections on port: %d\n", controlPort); 
+
+	int fromlen = sizeof( client );
+	char buffer[ MAX_BUFFER ];
+	int n;
+
+	while(1){
+		FD_ZERO( &readfds ); //initializes the file descriptor set
+		FD_SET( sd, &readfds ); //select() will check tcp socket for activity
+
+		//If there is activity on the socket
+		if ( FD_ISSET( sd, &readfds ) ) {
+      		int newsock = accept( sd, (struct sockaddr *)&client, (socklen_t *)&fromlen );
+      		printf("MAIN: Rcvd incoming TCP connection from: %s\n", inet_ntoa( (struct in_addr)client.sin_addr ));
+
+		}
+	}
+
+
+
+
 
 	// Freeing the allocated memory
 	for(i=0; i<MAX_STATIONS; i++) {
