@@ -19,7 +19,6 @@ typedef struct {
 } Index;
 
 typedef struct BaseStation BaseStation;
-
 struct BaseStation{
 	char* id;
 	int x;
@@ -27,6 +26,14 @@ struct BaseStation{
 	int num_links;
 	char** links;
 };
+
+typedef struct {
+	char* origin_id;
+	char* next_id;
+	char* destination_id;
+	int hoplist_len;
+	char** hoplist;
+} DataMessage;
 
 void generateBaseStations(const char* baseStationFile);
 void readStdin();
@@ -61,9 +68,9 @@ int main(int argc, char* argv[]) {
 	  return 1; 
 	} 
 
-
     pthread_t tid;
     pthread_create(&tid, NULL, listenForConnections, NULL);
+
     readStdin();
 
 	return EXIT_SUCCESS;
@@ -137,17 +144,17 @@ void generateBaseStations(const char* baseStationFile){
 	}
 
 	// //Print out all the base stations for debugging
-	for(int i = 0; i < num_stations; i++){
-		BaseStation b = base_stations[i];
-		printf("id: %s\n", b.id);
-		printf("x: %d\n", b.x);
-		printf("y: %d\n", b.y);
-		printf("num_links: %d\n", b.num_links);
-		for(int j = 0; j < b.num_links; j++){
-			printf(" %s\n", b.links[j]);
-		}
-		printf("\n");
-	}
+	// for(int i = 0; i < num_stations; i++){
+	// 	BaseStation b = base_stations[i];
+	// 	printf("id: %s\n", b.id);
+	// 	printf("x: %d\n", b.x);
+	// 	printf("y: %d\n", b.y);
+	// 	printf("num_links: %d\n", b.num_links);
+	// 	for(int j = 0; j < b.num_links; j++){
+	// 		printf(" %s\n", b.links[j]);
+	// 	}
+	// 	printf("\n");
+	// }
 
 	fclose(file);
 }
@@ -156,7 +163,7 @@ void readStdin(){
     char stdin_buffer[MAX_BUFFER];
     int num_bytes = 0;
 
-	//Main thread blocking on stdin
+	//Block on stdin
 	while(fgets(stdin_buffer, MAX_BUFFER, stdin)){
 		stdin_buffer[strcspn(stdin_buffer, "\n")] = 0; //remove newline from stdin_buffer
 		num_bytes = strlen(stdin_buffer);
@@ -165,6 +172,38 @@ void readStdin(){
 		if(strstr(stdin_buffer,"SENDDATA") != NULL){
 
 			printf("MAIN: recieved SENDDATA command\n");
+
+			//Get the origin_id and destination_id
+			char* origin_id;
+			char* destination_id;
+
+			char* token = strtok(stdin_buffer, " ");
+			int num_reads = 0;
+			while(token != NULL) {
+				if(num_reads == 1){
+					origin_id = calloc(strlen(token)+1, sizeof(char));
+					strcpy(origin_id, token);
+				} else if(num_reads == 2){
+					destination_id = calloc(strlen(token)+1, sizeof(char));
+					strcpy(destination_id, token);
+				}
+				num_reads++;
+				token = strtok(NULL, " ");
+			}
+
+			DataMessage* msg = malloc(sizeof(DataMessage));
+    		if(strcmp(origin_id, "CONTROL") == 0){
+
+    			printf("I think this is the first message\n");
+
+    		}else{
+
+    			//Message came from a base station
+    			printf("Message came from a base station\n");
+
+    		}
+
+
 
 		}else if(strstr(stdin_buffer,"QUIT") != NULL){
 
