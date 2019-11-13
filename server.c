@@ -51,6 +51,8 @@ void readStdin();
 void* listenForConnections(void* p);
 void* handleSensor(void* p);
 void createSensor(char* sensor_id, int sensor_range, int x_pos, int y_pos);
+char* intToString(int num);
+void sendThereMessage(int fd, char* node_id, char* x_pos_str, char* y_pos_str);
 
 fd_set readfds; //keeps track of the sockets that 'select will listen for'
 unsigned short controlPort;
@@ -343,6 +345,51 @@ void* handleSensor(void* p){
 
 				printf("recieved where\n");
 
+				//get the id
+				char* node_id;
+				char* token = strtok(buffer, " ");
+				int num_reads = 0;
+				while(token != NULL) {
+					if(num_reads == 1){
+						node_id = calloc(strlen(token)+1, sizeof(char));
+						strcpy(node_id, token);
+					}
+					num_reads++;
+					token = strtok(NULL, " ");
+				}
+
+				//find this node and return the node id
+				bool found_node = false;
+				for(int i = 0; i < num_stations; i++){
+					if(strcmp(base_stations[i].id, node_id) == 0){
+						int x_pos = base_stations[i].x;
+						int y_pos = base_stations[i].y;
+						char* x_pos_str = intToString(x_pos);
+						char* y_pos_str = intToString(y_pos);
+						sendThereMessage(fd, node_id, x_pos_str, y_pos_str);
+						free(x_pos_str);
+						free(y_pos_str);
+						found_node = true;
+						break;
+					}
+				}
+
+				if(found_node) continue;
+
+				for(int i = 0; i < num_sensors; i++){
+					if(strcmp(sensors[i].id, node_id) == 0){
+						int x_pos = sensors[i].x;
+						int y_pos = sensors[i].y;
+						char* x_pos_str = intToString(x_pos);
+						char* y_pos_str = intToString(y_pos);
+						sendThereMessage(fd, node_id, x_pos_str, y_pos_str);
+						free(x_pos_str);
+						free(y_pos_str);
+						found_node = true;
+						break;
+					}
+				}
+
 			}else if(strstr(buffer, "UPDATEPOSITION") != NULL){
 
 				printf("recieved UPDATEPOSITION\n");
@@ -435,4 +482,26 @@ void createSensor(char* sensor_id, int sensor_range, int x_pos, int y_pos){
 	printf(" y: %d\n", sensors[num_sensors].y);
 
 	num_sensors++;
+}
+
+char* intToString(int num){
+	char* str = calloc(10, sizeof(char));
+	sprintf(str, "%d", num);
+	return str;
+}
+
+void sendThereMessage(int fd, char* node_id, char* x_pos_str, char* y_pos_str){
+	//format there message
+	int there_msg_len = 5 + 1 + strlen(node_id) + 1 + 
+		strlen(x_pos_str) + 1 + strlen(y_pos_str);
+	char* there_msg = calloc(there_msg_len + 1, sizeof(char));
+	strcat(there_msg, "THERE ");
+	strcat(there_msg, node_id);
+	strcat(there_msg, " ");
+	strcat(there_msg, x_pos_str);
+	strcat(there_msg, " ");
+	strcat(there_msg, y_pos_str);
+	there_msg[there_msg_len] = '\0';
+	send(fd, there_msg, there_msg_len, 0);
+	free(there_msg);
 }

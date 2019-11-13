@@ -108,10 +108,10 @@ int main(int argc, char* argv[]) {
 				return EXIT_FAILURE;
 			}
 			else if(bytes == 0) {
-				printf("Received no data. Server socket seems to have closed!\n")
+				printf("Received no data. Server socket seems to have closed!\n");
 			}
 			else {
-				buffer[n] = '\0';
+				buffer[bytes] = '\0';
 				printf("Received from server: %s\n", buffer);
 			}
 		}
