@@ -38,6 +38,16 @@ typedef struct{
 	int y;
 } Sensor;
 
+typedef struct{
+	Sensor* reachable_sensors;
+	int num_reachable_sensors;
+} SensorReachableInfo;
+
+typedef struct{
+	BaseStation* reachable_stations;
+	int num_reachable_stations;
+} StationReachableInfo;
+
 typedef struct {
 	char* origin_id;
 	char* next_id;
@@ -53,6 +63,12 @@ void* handleSensor(void* p);
 void createSensor(char* sensor_id, int sensor_range, int x_pos, int y_pos);
 char* intToString(int num);
 void sendThereMessage(int fd, char* node_id, char* x_pos_str, char* y_pos_str);
+SensorReachableInfo* getSensorReachableInfo(Sensor new_sensor);
+StationReachableInfo* getStationReachableInfo(Sensor new_sensor);
+void freeSensorReachableInfo(SensorReachableInfo* sensor_info);
+void freeStationReachableInfo(StationReachableInfo* station_info);
+void sendReachableMsg(int fd, int total_num_reachable, int num_reachable_sensors, int num_reachable_stations,
+	Sensor* reachable_sensors, BaseStation* reachable_stations);
 
 fd_set readfds; //keeps track of the sockets that 'select will listen for'
 unsigned short controlPort;
@@ -159,19 +175,6 @@ void generateBaseStations(const char* baseStationFile){
 		}
 		num_stations++;		
 	}
-
-	// //Print out all the base stations for debugging
-	// for(int i = 0; i < num_stations; i++){
-	// 	BaseStation b = base_stations[i];
-	// 	printf("id: %s\n", b.id);
-	// 	printf("x: %d\n", b.x);
-	// 	printf("y: %d\n", b.y);
-	// 	printf("num_links: %d\n", b.num_links);
-	// 	for(int j = 0; j < b.num_links; j++){
-	// 		printf(" %s\n", b.links[j]);
-	// 	}
-	// 	printf("\n");
-	// }
 
 	fclose(file);
 }
@@ -313,11 +316,6 @@ void* handleSensor(void* p){
 			int k;
 			close( fd );
 
-			// if(is_logged_in){
-			//   deleteUser(current_user.userid);
-			//   is_logged_in = false;  
-			// }   
-
 			/* remove fd from client_sockets[] array: */
 			for ( k = 0 ; k < client_socket_index ; k++ )
 			{
@@ -358,7 +356,8 @@ void* handleSensor(void* p){
 					token = strtok(NULL, " ");
 				}
 
-				//find this node and return the node id
+				//Find this node and return the node id
+				//search in the base stations first
 				bool found_node = false;
 				for(int i = 0; i < num_stations; i++){
 					if(strcmp(base_stations[i].id, node_id) == 0){
@@ -376,6 +375,7 @@ void* handleSensor(void* p){
 
 				if(found_node) continue;
 
+				//if not in the base stations, check in the sensors
 				for(int i = 0; i < num_sensors; i++){
 					if(strcmp(sensors[i].id, node_id) == 0){
 						int x_pos = sensors[i].x;
@@ -400,6 +400,7 @@ void* handleSensor(void* p){
 				char* y_str;
 				int sensor_range, x_pos, y_pos;
 
+				//parse the rest of the updateposition message
 				char* token = strtok(buffer, " ");
 				int num_reads = 0;
 				while(token != NULL) {
@@ -420,14 +421,17 @@ void* handleSensor(void* p){
 					token = strtok(NULL, " ");
 				}
 
+				//convert sensor_range, x, and y to ints
 				sscanf(sensor_range_str, "%d", &sensor_range);
 				sscanf(x_str, "%d", &x_pos); 
 				sscanf(y_str, "%d", &y_pos);  
+				Sensor new_sensor;
 
 				//Add sensor to array of sensors
 				if(num_sensors == 0){
 
 					createSensor(sensor_id, sensor_range, x_pos, y_pos);
+					new_sensor = sensors[num_sensors-1];
 
 				}else{
 
@@ -442,14 +446,48 @@ void* handleSensor(void* p){
 						}
 					}
 
+					pthread_mutex_lock(&lock);
 					if(found_sensor){ //update sensors position
 						sensors[sensor_index].x = x_pos;
 						sensors[sensor_index].y = y_pos;
+						new_sensor = sensors[sensor_index];
 					}else{
 						createSensor(sensor_id, sensor_range, x_pos, y_pos);
+						new_sensor = sensors[num_sensors-1];
 					}
-
+					pthread_mutex_unlock(&lock);
 				}
+
+				//Get reachable sensors and stations
+				SensorReachableInfo* sensor_info = getSensorReachableInfo(new_sensor);
+				Sensor* reachable_sensors = sensor_info->reachable_sensors;
+				int num_reachable_sensors = sensor_info->num_reachable_sensors;
+
+				Sensor current_sensor;
+				for(int i = 0; i < num_reachable_sensors; i++){
+					current_sensor = reachable_sensors[i];
+					printf("sensor id: %s, x: %d, y: %d\n", current_sensor.id, current_sensor.x, current_sensor.y);
+				}
+
+				StationReachableInfo* station_info = getStationReachableInfo(new_sensor);
+				BaseStation* reachable_stations = station_info->reachable_stations;
+				int num_reachable_stations = station_info->num_reachable_stations;
+
+				BaseStation current_station;
+				for(int i = 0; i < num_reachable_stations; i++){
+					current_station = reachable_stations[i];
+					printf("station id: %s, x: %d, y: %d\n", current_station.id, current_station.x, current_station.y);
+				}
+
+				int total_num_reachable = num_reachable_sensors + num_reachable_stations;
+				printf("total_num_reachable: %d, num_reachable_sensors: %d, num_reachable_stations: %d\n", 
+					total_num_reachable, num_reachable_sensors, num_reachable_stations);
+
+				sendReachableMsg(fd, total_num_reachable, num_reachable_sensors, num_reachable_stations,
+					reachable_sensors, reachable_stations);
+
+				freeSensorReachableInfo(sensor_info);
+				freeStationReachableInfo(station_info);
 
 			}else if(strstr(buffer, "DATAMESSAGE") != NULL){
 
@@ -475,12 +513,6 @@ void createSensor(char* sensor_id, int sensor_range, int x_pos, int y_pos){
 	sensors[num_sensors].x = x_pos;
 	sensors[num_sensors].y = y_pos;
 
-	printf("Just created new sensor:\n");
-	printf(" id: %s\n", sensors[num_sensors].id);
-	printf(" range: %d\n", sensors[num_sensors].range);
-	printf(" x: %d\n", sensors[num_sensors].x);
-	printf(" y: %d\n", sensors[num_sensors].y);
-
 	num_sensors++;
 }
 
@@ -504,4 +536,158 @@ void sendThereMessage(int fd, char* node_id, char* x_pos_str, char* y_pos_str){
 	there_msg[there_msg_len] = '\0';
 	send(fd, there_msg, there_msg_len, 0);
 	free(there_msg);
+}
+
+SensorReachableInfo* getSensorReachableInfo(Sensor new_sensor){
+	//Getting reachable sensors;
+	int left_bound = new_sensor.x - new_sensor.range;
+	int right_bound = new_sensor.x + new_sensor.range;
+	int upper_bound = new_sensor.y + new_sensor.range;
+	int lower_bound = new_sensor.y - new_sensor.range;
+	int num_reachable_sensors = 0;
+	//Allocate max space to avoid reallocation
+	Sensor* reachable_sensors = calloc(num_sensors, sizeof(Sensor));
+	Sensor current_sensor;
+	for(int i = 0; i < num_sensors; i++){
+		current_sensor = sensors[i];
+		if(strcmp(current_sensor.id, new_sensor.id) != 0){
+			//check if sensors is reachable
+			if(current_sensor.x >= left_bound && current_sensor.x <= right_bound &&
+				current_sensor.y >= lower_bound && current_sensor.y <= upper_bound){
+				reachable_sensors[num_reachable_sensors++] = current_sensor;
+			}
+		}
+	}
+
+	SensorReachableInfo* result = malloc(sizeof(SensorReachableInfo));
+	result->reachable_sensors = reachable_sensors;
+	result->num_reachable_sensors = num_reachable_sensors;
+	return result;
+}
+
+StationReachableInfo* getStationReachableInfo(Sensor new_sensor){
+	//Getting reachable base stations
+	int left_bound = new_sensor.x - new_sensor.range;
+	int right_bound = new_sensor.x + new_sensor.range;
+	int upper_bound = new_sensor.y + new_sensor.range;
+	int lower_bound = new_sensor.y - new_sensor.range;
+	BaseStation* reachable_stations = calloc(num_stations, sizeof(BaseStation));
+	BaseStation current_station;
+	int num_reachable_stations = 0;
+	for(int i = 0; i < num_stations; i++){
+		current_station = base_stations[i];
+		if(strcmp(current_station.id, new_sensor.id) != 0){
+			//check if sensors is reachable
+			if(current_station.x >= left_bound && current_station.x <= right_bound &&
+				current_station.y >= lower_bound && current_station.y <= upper_bound){
+				reachable_stations[num_reachable_stations++] = current_station;
+			}
+		}
+	}
+
+	StationReachableInfo* result = malloc(sizeof(StationReachableInfo));
+	result->reachable_stations = reachable_stations;
+	result->num_reachable_stations = num_reachable_stations;
+	return result;
+}
+
+void freeSensorReachableInfo(SensorReachableInfo* sensor_info){
+	free(sensor_info->reachable_sensors);
+	free(sensor_info);
+}
+
+void freeStationReachableInfo(StationReachableInfo* station_info){
+	free(station_info->reachable_stations);
+	free(station_info);
+}
+
+void sendReachableMsg(int fd, int total_num_reachable, int num_reachable_sensors, int num_reachable_stations, 
+	Sensor* reachable_sensors, BaseStation* reachable_stations){
+	//format the reachable_list string
+	//calculate the length of the string
+	int reachable_list_len = 0;
+	char* current_id;
+	char* current_x_str;
+	char* current_y_str;
+
+	int current_x, current_y, num_reachables_traversed = 0;
+	char** reachable_ids = calloc(total_num_reachable, sizeof(char*));
+	char** reachable_x_strs = calloc(total_num_reachable, sizeof(char*));
+	char** reachable_y_strs = calloc(total_num_reachable, sizeof(char*));
+
+	//get all the reachable sensors
+	Sensor current_sensor;
+	for(int i = 0; i < num_reachable_sensors; i++){
+		current_sensor = reachable_sensors[i];
+		current_id = current_sensor.id;
+		current_x = current_sensor.x;
+		current_y = current_sensor.y;
+		current_x_str = intToString(current_x);
+		current_y_str = intToString(current_y);
+		reachable_list_len += strlen(current_id) + 1 + strlen(current_x_str) + 1
+			+ strlen(current_y_str);
+		reachable_ids[num_reachables_traversed] = current_id;
+		reachable_x_strs[num_reachables_traversed] = current_x_str;
+		reachable_y_strs[num_reachables_traversed] = current_y_str;
+		num_reachables_traversed++;
+	}
+
+	//get all the reachable base stations
+	BaseStation current_station;
+	for(int i = 0; i < num_reachable_stations; i++){
+		current_station = reachable_stations[i];
+		current_id = current_station.id;
+		current_x = current_station.x;
+		current_y = current_station.y;
+		current_x_str = intToString(current_x);
+		current_y_str = intToString(current_y);
+		reachable_list_len += strlen(current_id) + 1 + strlen(current_x_str) + 1
+			+ strlen(current_y_str);
+		reachable_ids[num_reachables_traversed] = current_id;
+		reachable_x_strs[num_reachables_traversed] = current_x_str;
+		reachable_y_strs[num_reachables_traversed] = current_y_str;
+		num_reachables_traversed++;
+	}
+
+	//Add room for the spaces between entries
+	reachable_list_len += total_num_reachable - 1; 
+
+	//copy ids, and positions into the reachable_list string
+	char* reachable_list = calloc(reachable_list_len + 1, sizeof(char));
+	for(int i = 0; i < total_num_reachable; i++){
+		printf("%s %s %s\n", reachable_ids[i], reachable_x_strs[i], reachable_y_strs[i]);
+		strcat(reachable_list, reachable_ids[i]);
+		strcat(reachable_list, " ");
+		strcat(reachable_list, reachable_x_strs[i]);
+		strcat(reachable_list, " ");
+		strcat(reachable_list, reachable_y_strs[i]);
+		if(i != total_num_reachable - 1)
+			strcat(reachable_list, " ");
+		free(reachable_x_strs[i]);
+		free(reachable_y_strs[i]);
+	}
+	reachable_list[reachable_list_len] = '\0';
+
+	free(reachable_ids);
+	free(reachable_x_strs);
+	free(reachable_y_strs);
+
+	//calculate length of reachable msg
+	char* total_num_reachable_str = intToString(total_num_reachable);
+	int total_num_reachable_strlen = strlen(total_num_reachable_str);
+	int reachable_msglen = 9 + 1 + total_num_reachable_strlen + 1 + reachable_list_len;
+	char* reachable_msg = calloc(reachable_msglen + 1, sizeof(char));
+
+	//concat the reachable msg
+	strcat(reachable_msg, "REACHABLE");
+	strcat(reachable_msg, " ");
+	strcat(reachable_msg, total_num_reachable_str);
+	strcat(reachable_msg, " ");
+	strcat(reachable_msg, reachable_list);
+	reachable_msg[reachable_msglen] = '\0';
+
+	send(fd, reachable_msg, reachable_msglen, 0);
+
+	free(reachable_list);
+	free(reachable_msg);
 }
