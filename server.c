@@ -49,6 +49,11 @@ typedef struct{
 	int num_reachable_stations;
 } StationReachableInfo;
 
+typedef struct{
+	char* origin_id;
+	char* destination_id;
+}OriginAndDestination;
+
 typedef struct {
 	char* origin_id;
 	char* next_id;
@@ -58,12 +63,23 @@ typedef struct {
 } DataMessage;
 
 void generateBaseStations(const char* baseStationFile);
+void parseBaseStationFromLine(char* line);
 void readStdin();
+void handleSendData(char stdin_buffer[]);
+OriginAndDestination* parseSendDataMsg(char buffer[]);
+void freeOriginAndDestination(OriginAndDestination* orig_and_dest);
+BaseStation findStationClosestToSensor(Sensor sensor);
 void* listenForConnections(void* p);
 void* handleSensor(void* p);
+void handleWhere(int fd, char buffer[]);
+void handleUpdatePosition(int fd, char buffer[]);
+char* parseWhereMsg(char buffer[]);
+Sensor* parseUpdatePositionMsg(char buffer[]);
+int getSensorIndex(char* sensor_id);
+Sensor updateSensorPosition(char* sensor_id, int x, int y);
 void createSensor(char* sensor_id, int sensor_range, int x_pos, int y_pos);
 char* intToString(int num);
-void sendThereMessage(int fd, char* node_id, char* x_pos_str, char* y_pos_str);
+void sendThereMessage(int fd, char* node_id);
 SensorReachableInfo* getSensorReachableInfo(Sensor new_sensor);
 StationReachableInfo* getStationReachableInfo(Sensor new_sensor);
 void freeSensorReachableInfo(SensorReachableInfo* sensor_info);
@@ -122,76 +138,72 @@ int main(int argc, char* argv[]) {
 }
 
 void generateBaseStations(const char* baseStationFile){
-	//PARSING BASE STATION FILE-------------------------------------------
-
-	// Try to open file and extract necessary information
+	// Try to open file
 	FILE *file = fopen(baseStationFile, "r");
 	if(file == NULL) {
 		fprintf(stderr, "ERROR: File could not be found/opened!\n");
 		exit(1);
 	}
 
-	// Print base station found
-	printf("Found base station file: %s\n", baseStationFile);
-
 	//Get the number of stations (number of lines in file)
 	char* line = NULL;
 	size_t _len = 0;
 	ssize_t line_len;
-
 	while ((line_len = getline(&line, &_len, file)) != -1) {
 		num_stations++;
 	}
-	printf("%d stations\n", num_stations);
 	base_stations = calloc(num_stations, sizeof(BaseStation));
 
 	rewind(file); //resets the pointer to beginning of file
 	num_stations = 0;
 	while((line_len = getline(&line, &_len, file)) != -1) {
-
-		// Counter to indicate current value parsed in the file
-		// 0 --- Base ID
-		// 1 --- X-Coordinate
-		// 2 --- Y-Coordinate
-		// 3 --- Number of Links
-		// 4 --- List of Stations
-		int value = 0;
-
-		// Run through each line from file, splitting by a space delimiter
-		char* token = strtok(line, " ");
-		while(token != NULL) {
-			if(value == 0) {
-				base_stations[num_stations].id = calloc(strlen(token) + 1, sizeof(char));
-				strcpy(base_stations[num_stations].id, token);
-			}
-			else if(value == 1) {
-				sscanf(token, "%d", &(base_stations[num_stations].x));  
-			}
-			else if(value == 2) {
-				sscanf(token, "%d", &(base_stations[num_stations].y));  
-			}
-			else if(value == 3) {
-				sscanf(token, "%d", &(base_stations[num_stations].num_links)); 
-				base_stations[num_stations].links = calloc(base_stations[num_stations].num_links, sizeof(char*)); 
-			}
-			else if(value == 4) {
-				for(int i = 0; i < base_stations[num_stations].num_links; i++){
-					//remove possible newline character
-					if(token[strlen(token) - 1] == '\n')
-						token[strcspn(token, "\n")] = 0;
-
-					base_stations[num_stations].links[i] = calloc(strlen(token) + 1, sizeof(char));
-					strcpy(base_stations[num_stations].links[i], token);
-					token = strtok(NULL, " ");
-				}
-			}
-			value++;
-			token = strtok(NULL, " ");
-		}
-		num_stations++;		
+		parseBaseStationFromLine(line);
 	}
 
 	fclose(file);
+}
+
+void parseBaseStationFromLine(char* line){
+	// Counter to indicate current value parsed on this line
+	// 0 --- Base ID
+	// 1 --- X-Coordinate
+	// 2 --- Y-Coordinate
+	// 3 --- Number of Links
+	// 4 --- List of Stations
+	int value = 0;
+
+	// Run through each line from file, splitting by a space delimiter
+	char* token = strtok(line, " ");
+	while(token != NULL) {
+		if(value == 0) {
+			base_stations[num_stations].id = calloc(strlen(token) + 1, sizeof(char));
+			strcpy(base_stations[num_stations].id, token);
+		}
+		else if(value == 1) {
+			sscanf(token, "%d", &(base_stations[num_stations].x));  
+		}
+		else if(value == 2) {
+			sscanf(token, "%d", &(base_stations[num_stations].y));  
+		}
+		else if(value == 3) {
+			sscanf(token, "%d", &(base_stations[num_stations].num_links)); 
+			base_stations[num_stations].links = calloc(base_stations[num_stations].num_links, sizeof(char*)); 
+		}
+		else if(value == 4) {
+			for(int i = 0; i < base_stations[num_stations].num_links; i++){
+				//remove possible newline character
+				if(token[strlen(token) - 1] == '\n')
+					token[strcspn(token, "\n")] = 0;
+
+				base_stations[num_stations].links[i] = calloc(strlen(token) + 1, sizeof(char));
+				strcpy(base_stations[num_stations].links[i], token);
+				token = strtok(NULL, " ");
+			}
+		}
+		value++;
+		token = strtok(NULL, " ");
+	}
+	num_stations++;		
 }
 
 void readStdin(){
@@ -207,89 +219,7 @@ void readStdin(){
 		if(strstr(stdin_buffer,"SENDDATA") != NULL){
 
 			printf("MAIN: recieved SENDDATA command\n");
-
-			//Get the origin_id and destination_id
-			char* origin_id;
-			char* destination_id;
-
-			char* token = strtok(stdin_buffer, " ");
-			int num_reads = 0;
-			while(token != NULL) {
-				if(num_reads == 1){
-					origin_id = calloc(strlen(token)+1, sizeof(char));
-					strcpy(origin_id, token);
-				} else if(num_reads == 2){
-					destination_id = calloc(strlen(token)+1, sizeof(char));
-					strcpy(destination_id, token);
-				}
-				num_reads++;
-				token = strtok(NULL, " ");
-			}
-
-			DataMessage* msg = malloc(sizeof(DataMessage));
-    		if(strcmp(origin_id, "CONTROL") == 0){
-
-    			//find the sensor
-    			bool found_sensor = false;
-    			Sensor destination_sensor;
-    			for(int i = 0; i < num_sensors; i++){
-    				if(strcmp(sensors[i].id, destination_id) == 0){
-    					found_sensor = true;
-    					destination_sensor = sensors[i];
-    				}
-    			}
-
-    			if(found_sensor){
-
-    				//find the base station closes to the sensor
-    				int min_index = 0;
-    				float distance, min_distance = 0;
-    				BaseStation station, min_station;
-    				for(int i = 0; i < num_stations; i++){
-    					station = base_stations[i];
-    					printf("station: %s, position: (%d, %d)\n", 
-    						station.id, station.x, station.y);
-    					distance = getDistance(station.x, station.y, destination_sensor.x, destination_sensor.y);
-    					printf("distance to point (%d, %d) is: %f\n", destination_sensor.x, destination_sensor.y,
-    						distance);
-    					printf("%f\n", distance);
-    					if(i == 0 || distance < min_distance){
-    						min_distance = distance;
-    						min_index = i;
-    					}
-    				}
-    				min_station = base_stations[min_index];
-
-    				printf("base_stations[%d] with id: %s has min_distance: %f to destination %s at position: (%d,%d)\n", 
-    					min_index, min_station.id, min_distance, destination_sensor.id, destination_sensor.x,
-    					destination_sensor.y);
-
-    				//send data message to closest station
-    				char* data_message = calloc(MAX_BUFFER, sizeof(char));
-    				sprintf(data_message, "DATAMESSAGE  %s  %s  %s  %d", origin_id, min_station.id, destination_id,
-    					0);
-
-    				//initialize data message struct
-    				DataMessage* dm_struct = malloc(sizeof(DataMessage));
-    				dm_struct->origin_id = calloc(8, sizeof(char));
-    				strcpy(dm_struct->origin_id, "CONTROL");
-    				dm_struct->next_id = min_station.id;
-    				dm_struct->destination_id = destination_id;
-    				dm_struct->hoplist_len = 0;
-
-    				handleMessageAsBaseStation(dm_struct, data_message);
-
-    			}else{
-    				printf("Sensor not found\n");
-    			}
-
-    		}else{
-
-    			//Message came from a base station
-    			printf("Message came from a base station\n");
-
-    		}
-
+			handleSendData(stdin_buffer);
 
 
 		}else if(strstr(stdin_buffer,"QUIT") != NULL){
@@ -300,6 +230,97 @@ void readStdin(){
 
 		memset(stdin_buffer, 0, MAX_BUFFER);  
 	}
+}
+
+void handleSendData(char stdin_buffer[]){
+	//Get the origin_id and destination_id
+	OriginAndDestination* orig_and_dest = parseSendDataMsg(stdin_buffer);
+	char* origin_id = orig_and_dest->origin_id;
+	char* destination_id = orig_and_dest->destination_id;
+
+	DataMessage* msg = malloc(sizeof(DataMessage));
+	if(strcmp(origin_id, "CONTROL") == 0){
+
+		Sensor* destination_sensor_ptr = getSensor(destination_id);
+		if(destination_sensor_ptr != NULL){
+			Sensor destination_sensor = *destination_sensor_ptr;
+
+			BaseStation closest_station = findStationClosestToSensor(destination_sensor);
+
+			//format data message to closest station
+			char* data_message = calloc(MAX_BUFFER, sizeof(char));
+			sprintf(data_message, "DATAMESSAGE  %s  %s  %s  %d", origin_id, closest_station.id, destination_id,
+				0);
+
+			//initialize data message struct
+			DataMessage* dm_struct = malloc(sizeof(DataMessage));
+			dm_struct->origin_id = calloc(8, sizeof(char));
+			strcpy(dm_struct->origin_id, "CONTROL");
+			dm_struct->next_id = closest_station.id;
+			dm_struct->destination_id = destination_id;
+			dm_struct->hoplist_len = 0;
+
+			//send data message to closest station
+			handleMessageAsBaseStation(dm_struct, data_message);
+
+		}else{
+			printf("Sensor not found\n");
+		}
+
+	}else{
+
+		//Message came from a base station
+		printf("Message came from a base station\n");
+
+	}
+
+	freeOriginAndDestination(orig_and_dest);
+}
+
+OriginAndDestination* parseSendDataMsg(char buffer[]){
+	OriginAndDestination* orig_and_dest = malloc(sizeof(OriginAndDestination));
+	char* token = strtok(buffer, " ");
+	int num_reads = 0;
+	while(token != NULL) {
+		if(num_reads == 1){
+			orig_and_dest->origin_id = calloc(strlen(token)+1, sizeof(char));
+			strcpy(orig_and_dest->origin_id, token);
+		} else if(num_reads == 2){
+			orig_and_dest->destination_id = calloc(strlen(token)+1, sizeof(char));
+			strcpy(orig_and_dest->destination_id, token);
+		}
+		num_reads++;
+		token = strtok(NULL, " ");
+	}
+	return orig_and_dest;
+}
+
+void freeOriginAndDestination(OriginAndDestination* orig_and_dest){
+	free(orig_and_dest->origin_id);
+	free(orig_and_dest->destination_id);
+}
+
+BaseStation findStationClosestToSensor(Sensor sensor){
+	int min_index = 0;
+	float distance, min_distance = 0;
+	BaseStation station, closest_station;
+	for(int i = 0; i < num_stations; i++){
+		station = base_stations[i];
+		distance = getDistance(station.x, station.y, sensor.x, sensor.y);
+		printf("distance to point (%d, %d) is: %f\n", sensor.x, sensor.y,
+			distance);
+		printf("%f\n", distance);
+		if(i == 0 || distance < min_distance){
+			min_distance = distance;
+			min_index = i;
+		}
+	}
+	closest_station = base_stations[min_index];
+
+	printf("base_stations[%d] with id: %s has min_distance: %f to destination %s at position: (%d,%d)\n", 
+		min_index, closest_station.id, min_distance, sensor.id, sensor.x,
+		sensor.y);
+	return closest_station;
 }
 
 void* listenForConnections(void* p){
@@ -407,152 +428,12 @@ void* handleSensor(void* p){
 			if(strstr(buffer,"WHERE") != NULL){
 
 				printf("recieved where\n");
-
-				//get the id
-				char* node_id;
-				char* token = strtok(buffer, " ");
-				int num_reads = 0;
-				while(token != NULL) {
-					if(num_reads == 1){
-						node_id = calloc(strlen(token)+1, sizeof(char));
-						strcpy(node_id, token);
-					}
-					num_reads++;
-					token = strtok(NULL, " ");
-				}
-
-				//Find this node and return the node id
-				//search in the base stations first
-				bool found_node = false;
-				for(int i = 0; i < num_stations; i++){
-					if(strcmp(base_stations[i].id, node_id) == 0){
-						int x_pos = base_stations[i].x;
-						int y_pos = base_stations[i].y;
-						char* x_pos_str = intToString(x_pos);
-						char* y_pos_str = intToString(y_pos);
-						sendThereMessage(fd, node_id, x_pos_str, y_pos_str);
-						free(x_pos_str);
-						free(y_pos_str);
-						found_node = true;
-						break;
-					}
-				}
-
-				if(found_node) continue;
-
-				//if not in the base stations, check in the sensors
-				for(int i = 0; i < num_sensors; i++){
-					if(strcmp(sensors[i].id, node_id) == 0){
-						int x_pos = sensors[i].x;
-						int y_pos = sensors[i].y;
-						char* x_pos_str = intToString(x_pos);
-						char* y_pos_str = intToString(y_pos);
-						sendThereMessage(fd, node_id, x_pos_str, y_pos_str);
-						free(x_pos_str);
-						free(y_pos_str);
-						found_node = true;
-						break;
-					}
-				}
+				handleWhere(fd, buffer);
 
 			}else if(strstr(buffer, "UPDATEPOSITION") != NULL){
 
 				printf("recieved UPDATEPOSITION\n");
-
-				char* sensor_id;
-				char* sensor_range_str;
-				char* x_str;
-				char* y_str;
-				int sensor_range, x_pos, y_pos;
-
-				//parse the rest of the updateposition message
-				char* token = strtok(buffer, " ");
-				int num_reads = 0;
-				while(token != NULL) {
-					if(num_reads == 1){
-						sensor_id = calloc(strlen(token)+1, sizeof(char));
-						strcpy(sensor_id, token);
-					}else if(num_reads == 2){
-						sensor_range_str = calloc(strlen(token)+1, sizeof(char));
-						strcpy(sensor_range_str, token);
-					}else if(num_reads == 3){
-						x_str = calloc(strlen(token)+1, sizeof(char));
-						strcpy(x_str, token);
-					}else if(num_reads == 4){
-						y_str = calloc(strlen(token)+1, sizeof(char));
-						strcpy(y_str, token);
-					}
-					num_reads++;
-					token = strtok(NULL, " ");
-				}
-
-				//convert sensor_range, x, and y to ints
-				sscanf(sensor_range_str, "%d", &sensor_range);
-				sscanf(x_str, "%d", &x_pos); 
-				sscanf(y_str, "%d", &y_pos);  
-				Sensor new_sensor;
-
-				//Add sensor to array of sensors
-				if(num_sensors == 0){
-
-					createSensor(sensor_id, sensor_range, x_pos, y_pos);
-					new_sensor = sensors[num_sensors-1];
-
-				}else{
-
-					//check if sensor is in sensors array
-					bool found_sensor = false;
-					int sensor_index;
-					for(int i = 0; i < num_sensors; i++){
-						if(strcmp(sensors[i].id, sensor_id) == 0){
-							found_sensor = true;
-							sensor_index = i;
-							break;
-						}
-					}
-
-					pthread_mutex_lock(&lock);
-					if(found_sensor){ //update sensors position
-						sensors[sensor_index].x = x_pos;
-						sensors[sensor_index].y = y_pos;
-						new_sensor = sensors[sensor_index];
-					}else{
-						createSensor(sensor_id, sensor_range, x_pos, y_pos);
-						new_sensor = sensors[num_sensors-1];
-					}
-					pthread_mutex_unlock(&lock);
-				}
-
-				//Get reachable sensors and stations
-				SensorReachableInfo* sensor_info = getSensorReachableInfo(new_sensor);
-				Sensor* reachable_sensors = sensor_info->reachable_sensors;
-				int num_reachable_sensors = sensor_info->num_reachable_sensors;
-
-				Sensor current_sensor;
-				for(int i = 0; i < num_reachable_sensors; i++){
-					current_sensor = reachable_sensors[i];
-					printf("sensor id: %s, x: %d, y: %d\n", current_sensor.id, current_sensor.x, current_sensor.y);
-				}
-
-				StationReachableInfo* station_info = getStationReachableInfo(new_sensor);
-				BaseStation* reachable_stations = station_info->reachable_stations;
-				int num_reachable_stations = station_info->num_reachable_stations;
-
-				BaseStation current_station;
-				for(int i = 0; i < num_reachable_stations; i++){
-					current_station = reachable_stations[i];
-					printf("station id: %s, x: %d, y: %d\n", current_station.id, current_station.x, current_station.y);
-				}
-
-				int total_num_reachable = num_reachable_sensors + num_reachable_stations;
-				printf("total_num_reachable: %d, num_reachable_sensors: %d, num_reachable_stations: %d\n", 
-					total_num_reachable, num_reachable_sensors, num_reachable_stations);
-
-				sendReachableMsg(fd, total_num_reachable, num_reachable_sensors, num_reachable_stations,
-					reachable_sensors, reachable_stations);
-
-				freeSensorReachableInfo(sensor_info);
-				freeStationReachableInfo(station_info);
+				handleUpdatePosition(fd, buffer);
 
 			}else if(strstr(buffer, "DATAMESSAGE") != NULL){
 
@@ -564,6 +445,158 @@ void* handleSensor(void* p){
 
 		}
 	}
+}
+
+void handleWhere(int fd, char buffer[]){
+	char* node_id = parseWhereMsg(buffer);
+
+	BaseStation* station_ptr = getBaseStation(node_id);
+	if(station_ptr != NULL){
+		BaseStation station = *station_ptr;
+		sendThereMessage(fd, station.id);
+		free(node_id);
+		return;
+	}
+
+	Sensor* sensor_ptr = getSensor(node_id);
+	Sensor sensor = *sensor_ptr;
+	sendThereMessage(fd, sensor.id);
+	free(node_id);
+}
+
+void handleUpdatePosition(int fd, char buffer[]){
+	Sensor* sensor_ptr = parseUpdatePositionMsg(buffer);
+	char* sensor_id = sensor_ptr->id;
+	int sensor_range = sensor_ptr->range;
+	int x = sensor_ptr->x;
+	int y = sensor_ptr->y;
+
+	Sensor new_sensor;
+	//Add sensor to array of sensors
+	if(num_sensors == 0){
+
+		createSensor(sensor_id, sensor_range, x, y);
+		new_sensor = sensors[num_sensors-1];
+
+	}else{
+
+		pthread_mutex_lock(&lock);
+		if(getSensor(sensor_id) != NULL){ 
+			new_sensor = updateSensorPosition(sensor_id, x, y);
+		}else{
+			createSensor(sensor_id, sensor_range, x, y);
+			new_sensor = sensors[num_sensors-1];
+		}
+		pthread_mutex_unlock(&lock);
+	}
+
+	//Get reachable sensors and stations
+	SensorReachableInfo* sensor_info = getSensorReachableInfo(new_sensor);
+	Sensor* reachable_sensors = sensor_info->reachable_sensors;
+	int num_reachable_sensors = sensor_info->num_reachable_sensors;
+
+	Sensor current_sensor;
+	for(int i = 0; i < num_reachable_sensors; i++){
+		current_sensor = reachable_sensors[i];
+		printf("sensor id: %s, x: %d, y: %d\n", current_sensor.id, current_sensor.x, current_sensor.y);
+	}
+
+	StationReachableInfo* station_info = getStationReachableInfo(new_sensor);
+	BaseStation* reachable_stations = station_info->reachable_stations;
+	int num_reachable_stations = station_info->num_reachable_stations;
+
+	BaseStation current_station;
+	for(int i = 0; i < num_reachable_stations; i++){
+		current_station = reachable_stations[i];
+		printf("station id: %s, x: %d, y: %d\n", current_station.id, current_station.x, current_station.y);
+	}
+
+	int total_num_reachable = num_reachable_sensors + num_reachable_stations;
+	printf("total_num_reachable: %d, num_reachable_sensors: %d, num_reachable_stations: %d\n", 
+		total_num_reachable, num_reachable_sensors, num_reachable_stations);
+
+	sendReachableMsg(fd, total_num_reachable, num_reachable_sensors, num_reachable_stations,
+		reachable_sensors, reachable_stations);
+
+	freeSensorReachableInfo(sensor_info);
+	freeStationReachableInfo(station_info);
+}
+
+Sensor* parseUpdatePositionMsg(char buffer[]){
+	char* sensor_id;
+	char* sensor_range_str;
+	char* x_str;
+	char* y_str;
+	char* token = strtok(buffer, " ");
+	int num_reads = 0;
+	while(token != NULL) {
+		if(num_reads == 1){
+			sensor_id = calloc(strlen(token)+1, sizeof(char));
+			strcpy(sensor_id, token);
+		}else if(num_reads == 2){
+			sensor_range_str = calloc(strlen(token)+1, sizeof(char));
+			strcpy(sensor_range_str, token);
+		}else if(num_reads == 3){
+			x_str = calloc(strlen(token)+1, sizeof(char));
+			strcpy(x_str, token);
+		}else if(num_reads == 4){
+			y_str = calloc(strlen(token)+1, sizeof(char));
+			strcpy(y_str, token);
+		}
+		num_reads++;
+		token = strtok(NULL, " ");
+	}
+
+	//convert sensor_range, x, and y to ints
+	int sensor_range, x, y;
+	sscanf(sensor_range_str, "%d", &sensor_range);
+	sscanf(x_str, "%d", &x); 
+	sscanf(y_str, "%d", &y);  
+
+	//create new sensor
+	Sensor* sensor = malloc(sizeof(Sensor));
+	sensor->id = sensor_id;
+	sensor->range = sensor_range;
+	sensor->x = x;
+	sensor->y = y;
+
+	//free temporary memory
+	free(sensor_range_str);
+	free(x_str);
+	free(y_str);
+
+	return sensor;
+}
+
+int getSensorIndex(char* sensor_id){
+	for(int i = 0; i < num_sensors; i++){
+		if(strcmp(sensors[i].id, sensor_id) == 0)
+			return i;
+	}
+	printf("Something went wrong\n");
+	return -1;
+}
+
+Sensor updateSensorPosition(char* sensor_id, int x, int y){
+	int index = getSensorIndex(sensor_id);
+	sensors[index].x = x;
+	sensors[index].y = y;
+	return sensors[index];
+}
+
+char* parseWhereMsg(char buffer[]){
+	char* node_id;
+	char* token = strtok(buffer, " ");
+	int num_reads = 0;
+	while(token != NULL) {
+		if(num_reads == 1){
+			node_id = calloc(strlen(token)+1, sizeof(char));
+			strcpy(node_id, token);
+		}
+		num_reads++;
+		token = strtok(NULL, " ");
+	}
+	return node_id;
 }
 
 void createSensor(char* sensor_id, int sensor_range, int x_pos, int y_pos){
@@ -587,19 +620,24 @@ char* intToString(int num){
 	return str;
 }
 
-void sendThereMessage(int fd, char* node_id, char* x_pos_str, char* y_pos_str){
-	//format there message
-	int there_msg_len = 5 + 1 + strlen(node_id) + 1 + 
-		strlen(x_pos_str) + 1 + strlen(y_pos_str);
-	char* there_msg = calloc(there_msg_len + 1, sizeof(char));
-	strcat(there_msg, "THERE ");
-	strcat(there_msg, node_id);
-	strcat(there_msg, " ");
-	strcat(there_msg, x_pos_str);
-	strcat(there_msg, " ");
-	strcat(there_msg, y_pos_str);
-	there_msg[there_msg_len] = '\0';
-	send(fd, there_msg, there_msg_len, 0);
+void sendThereMessage(int fd, char* node_id){
+	char* there_msg = calloc(MAX_BUFFER, sizeof(char));
+
+	//find node (either base station or sensor)
+	BaseStation* station_ptr = getBaseStation(node_id);
+	Sensor* sensor_ptr = getSensor(node_id);
+	BaseStation station;
+	Sensor sensor;
+
+	if(station_ptr == NULL){
+		sensor = *sensor_ptr;
+		sprintf(there_msg, "THERE %s  %d  %d", node_id, sensor.x, sensor.y);
+	}else{
+		station = *station_ptr;
+		sprintf(there_msg, "THERE %s  %d  %d", node_id, station.x, station.y);
+	}
+
+	send(fd, there_msg, strlen(there_msg), 0);
 	free(there_msg);
 }
 
