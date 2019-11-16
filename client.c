@@ -14,6 +14,7 @@
 #include <ctype.h>
 #include <limits.h>
 #include <pthread.h>
+#include <math.h>
 
 #define BUFFER 512
 
@@ -21,6 +22,7 @@ typedef struct {
 	char reachableID[BUFFER];
 	int xPosition;
 	int yPosition;
+	float distance;
 } ReachableList;
 
 int numReachable = 0;
@@ -34,6 +36,14 @@ int clientXPosition = 0;
 int clientYPosition = 0;
 
 pthread_mutex_t lock;
+
+float getDistance(float x1, float y1, float x2, float y2);
+void updatePosition(int sd, char* sensorID, int sensoryRange, int xPosition, int yPosition);
+void* childThread(void* someArgument);
+
+float getDistance(float x1, float y1, float x2, float y2){
+	return sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
+}
 
 // Function that updates the CONTROL server on the new position of the SENSOR
 void updatePosition(int sd, char* sensorID, int sensorRange, int xPosition, int yPosition) {
@@ -98,6 +108,11 @@ void updatePosition(int sd, char* sensorID, int sensorRange, int xPosition, int 
 					value = 3;
 				}
 				if(value == 3) {
+					// Find the distance between the current client and the sensor/base
+					float distance = getDistance(xPosition, yPosition, newEntry.xPosition, 
+						newEntry.yPosition);
+
+					newEntry.distance = distance;
 					reachables[reachableCounter++] = newEntry;
 					value = 0;
 				}
@@ -154,6 +169,9 @@ void* childThread(void* someArgument) {
 		ReachableList* hopList;
 		int hopListCounter = 0;
 
+		char newHopList[BUFFER];
+		strcpy(newHopList, "");
+
 		char* token = strtok(buffer, " ");
 		if(strcmp(token, "DATAMESSAGE") == 0) {
 			token = strtok(buffer, " ");
@@ -186,17 +204,23 @@ void* childThread(void* someArgument) {
 					while(token != NULL){
 						if(newValue == 0) {
 							strcpy(newHopEntry.reachableID, token);
+							strcat(newHopList, token);
 							newValue = 1;
 						}
 						else if(newValue == 1) {
 							newHopEntry.xPosition = atoi(token);
+							strcat(newHopList, " ");
+							strcat(newHopList, token);
 							newValue = 2;
 						}
 						else {
 							newHopEntry.yPosition = atoi(token);
+							strcat(newHopList, " ");
+							strcat(newHopList, token);
 							newValue = 3;
 						}
 						if(newValue == 3) {
+							strcat(newHopList, " ");
 							hopList[hopListCounter++] = newHopEntry;
 							newValue = 0;
 						}
@@ -217,7 +241,7 @@ void* childThread(void* someArgument) {
 				int allReachable = 0;
 				for(i=0; i<numReachable; i++) {
 					for(j=0; j<hopReachable; j++) {
-						if(strcmp(reachables[i].reachableID, hopList[j].hopReachable) == 0) {
+						if(strcmp(reachables[i].reachableID, hopList[j].reachableID) == 0) {
 							allReachable++;
 							break;
 						}
@@ -227,30 +251,31 @@ void* childThread(void* someArgument) {
 				// If all sensors/base stations are in hop list, message could not be delivered
 				// Else, deliver to the NextID
 				if(allReachable == numReachable) {
-					printf("%s: Message from %s to %s could not be delivered.\n");
+					printf("%s: Message from %s to %s could not be delivered.\n", clientSensorID, originID, destinationID);
 				}
 				else {
-					updatePosition(clientsd, clientSensorID, clientXPosition, clientYPosition);
+					updatePosition(clientsd, clientSensorID, clientSensorRange, clientXPosition, clientYPosition);
 
 					// Implementing the WHERE message
 					char someID[BUFFER];
+					char message[BUFFER];
 					strcpy(someID, destinationID);
 
 					sprintf(message, "WHERE %s", someID);
 
 					// Send the WHERE message to the control server
-					int bytes = send(sd, message, strlen(message), 0);
+					int bytes = send(clientsd, message, strlen(message), 0);
 					if(bytes < strlen(message)) {
 						fprintf(stderr, "ERROR: Could not send update position message to server!\n");
-						return EXIT_FAILURE;
+						exit(1);
 					}
 
 					// Should receive a THERE message from the server
-					bytes = recv(sd, buffer, BUFFER, 0);
+					bytes = recv(clientsd, buffer, BUFFER, 0);
 
 					if(bytes < 0) {
 						fprintf(stderr, "ERROR: Could not receive update position response from server!\n");
-						return EXIT_FAILURE;
+						exit(1);
 					}
 					else if(bytes == 0) {
 						printf("Received no data. Server socket seems to have closed!\n");
@@ -260,12 +285,55 @@ void* childThread(void* someArgument) {
 						printf("Received from server: %s\n", buffer);
 					}
 
+					// Find the distances for all of the reachable bases/sensors
+					// Make sure that the sensor/base is not already part of the hoplist
+					// To prevent infinite loops
+					float minDistance = INFINITY;
+					int nextXPosition = 0;
+					int nextYPosition = 0;
+					char closest[BUFFER];
+					for(i=0; i<numReachable; i++) {
+						if(reachables[i].distance < minDistance) {
+							int found = 0;
 
+							for(j=0; j<hopReachable; j++) {
+								if(strcmp(reachables[i].reachableID, hopList[j].reachableID) == 0) {
+									found = 1;
+								}
+							}
 
+							if(!found) {
+								minDistance = reachables[i].distance;
+								strcpy(closest, reachables[i].reachableID);
+								nextXPosition = reachables[i].xPosition;
+								nextYPosition = reachables[i].yPosition;
+							}
+							else {
+								continue;
+							}
+						}
+					}
 
+					hopReachable++;
+					strcat(newHopList, closest);
+					sprintf(newHopList, "%s %d", newHopList, nextXPosition);
+					sprintf(newHopList, "%s %d", newHopList, nextYPosition);
 
+					printf("%s: Message from %s to %s being forwarded through %s\n", clientSensorID, 
+						originID, destinationID, closest);
 
-					
+					// Send message to the CONTROL server
+					// Create the message that needs to be sent to the control server
+					sprintf(message, "DATAMESSAGE %s %s %s %d %s", originID, closest, destinationID, 
+						hopReachable, newHopList);
+
+					// Send the DATAMESSAGE to the server
+					bytes = send(clientsd, message, strlen(message), 0);
+					if(bytes < strlen(message)) {
+						fprintf(stderr, "ERROR: Could not send update position message to server!\n");
+						exit(1);
+					}
+
 				}
 			}
 
@@ -287,8 +355,6 @@ int main(int argc, char* argv[]) {
 
 	setvbuf(stdout, NULL, _IONBF, 0);
 	int i;
-	int j;
-	int k;
 
 	if(pthread_mutex_init(&lock, NULL) != 0) {
 		fprintf(stderr, "ERROR: Could initiate pthread mutex!\n");
@@ -403,11 +469,21 @@ int main(int argc, char* argv[]) {
 			token = strtok(NULL, " ");
 			strcpy(destination, token);
 
+			// Find the distances for all of the reachable bases/sensors
+			float minDistance = INFINITY;
+			char closest[BUFFER];
+			for(i=0; i<numReachable; i++) {
+				if(reachables[i].distance < minDistance) {
+					minDistance = reachables[i].distance;
+					strcpy(closest, reachables[i].reachableID);
+				}
+			}
+
 			printf("Sent a new message bound for %s\n", destination);
 
 			// Send message to the CONTROL server
 			// Create the message that needs to be sent to the control server
-			sprintf(message, "DATAMESSAGE %s", destination);
+			sprintf(message, "DATAMESSAGE %s %s %s 0", sensorID, closest, destination);
 
 			// Send the DATAMESSAGE to the server
 			int bytes = send(sd, message, strlen(message), 0);
