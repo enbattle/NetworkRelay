@@ -14,7 +14,7 @@ CFLAGS = -g -Wall -pthread
 default: server.out client.out
 
 client.out: client.c
-	gcc client.c -o client.out
+	gcc $(CFLAGS) client.c -o client.out
 
 server.out: server.c
 	gcc $(CFLAGS) server.c -o server.out
