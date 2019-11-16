@@ -17,4 +17,4 @@ client.out: client.c
 	gcc $(CFLAGS) client.c -o client.out
 
 server.out: server.c
-	gcc $(CFLAGS) server.c -o server.out
+	gcc $(CFLAGS) server.c -o server.out -lm
