@@ -86,6 +86,9 @@ void freeSensorReachableInfo(SensorReachableInfo* sensor_info);
 void freeStationReachableInfo(StationReachableInfo* station_info);
 void sendReachableMsg(int fd, int total_num_reachable, int num_reachable_sensors, int num_reachable_stations,
 	Sensor* reachable_sensors, BaseStation* reachable_stations);
+void addReachableSensorsAndStationsToReachableList(char* reachable_list, int total_num_reachable, 
+	int num_reachable_sensors, int num_reachable_stations, Sensor* reachable_sensors,
+	 BaseStation* reachable_stations);
 float getDistance(float x1, float y1, float x2, float y2);
 void handleMessageAsBaseStation(DataMessage* dm_struct, char* data_message);
 BaseStation* getBaseStation(char* id);
@@ -701,94 +704,49 @@ void freeStationReachableInfo(StationReachableInfo* station_info){
 
 void sendReachableMsg(int fd, int total_num_reachable, int num_reachable_sensors, int num_reachable_stations, 
 	Sensor* reachable_sensors, BaseStation* reachable_stations){
-	//format the reachable_list string
-	//calculate the length of the string
-	int reachable_list_len = 0;
-	char* current_id;
-	char* current_x_str;
-	char* current_y_str;
 
-	int current_x, current_y, num_reachables_traversed = 0;
-	char** reachable_ids = calloc(total_num_reachable, sizeof(char*));
-	char** reachable_x_strs = calloc(total_num_reachable, sizeof(char*));
-	char** reachable_y_strs = calloc(total_num_reachable, sizeof(char*));
+	char* reachable_list = calloc(MAX_BUFFER, sizeof(char));
+	addReachableSensorsAndStationsToReachableList(reachable_list, total_num_reachable, num_reachable_sensors,
+		num_reachable_stations, reachable_sensors, reachable_stations);
 
-	//get all the reachable sensors
-	Sensor current_sensor;
-	for(int i = 0; i < num_reachable_sensors; i++){
-		current_sensor = reachable_sensors[i];
-		current_id = current_sensor.id;
-		current_x = current_sensor.x;
-		current_y = current_sensor.y;
-		current_x_str = intToString(current_x);
-		current_y_str = intToString(current_y);
-		reachable_list_len += strlen(current_id) + 1 + strlen(current_x_str) + 1
-			+ strlen(current_y_str);
-		reachable_ids[num_reachables_traversed] = current_id;
-		reachable_x_strs[num_reachables_traversed] = current_x_str;
-		reachable_y_strs[num_reachables_traversed] = current_y_str;
-		num_reachables_traversed++;
-	}
+	char* reachable_msg = calloc(MAX_BUFFER, sizeof(char));
+	sprintf(reachable_msg, "REACHABLE %d %s", total_num_reachable, reachable_list);
 
-	//get all the reachable base stations
-	BaseStation current_station;
-	for(int i = 0; i < num_reachable_stations; i++){
-		current_station = reachable_stations[i];
-		current_id = current_station.id;
-		current_x = current_station.x;
-		current_y = current_station.y;
-		current_x_str = intToString(current_x);
-		current_y_str = intToString(current_y);
-		reachable_list_len += strlen(current_id) + 1 + strlen(current_x_str) + 1
-			+ strlen(current_y_str);
-		reachable_ids[num_reachables_traversed] = current_id;
-		reachable_x_strs[num_reachables_traversed] = current_x_str;
-		reachable_y_strs[num_reachables_traversed] = current_y_str;
-		num_reachables_traversed++;
-	}
-
-	//Add room for the spaces between entries
-	if(total_num_reachable > 0)
-		reachable_list_len += total_num_reachable - 1; 
-
-	//copy ids, and positions into the reachable_list string
-	char* reachable_list = calloc(reachable_list_len + 1, sizeof(char));
-	for(int i = 0; i < total_num_reachable; i++){
-		printf("%s %s %s\n", reachable_ids[i], reachable_x_strs[i], reachable_y_strs[i]);
-		strcat(reachable_list, reachable_ids[i]);
-		strcat(reachable_list, " ");
-		strcat(reachable_list, reachable_x_strs[i]);
-		strcat(reachable_list, " ");
-		strcat(reachable_list, reachable_y_strs[i]);
-		if(i != total_num_reachable - 1)
-			strcat(reachable_list, " ");
-		free(reachable_x_strs[i]);
-		free(reachable_y_strs[i]);
-	}
-	reachable_list[reachable_list_len] = '\0';
-
-	free(reachable_ids);
-	free(reachable_x_strs);
-	free(reachable_y_strs);
-
-	//calculate length of reachable msg
-	char* total_num_reachable_str = intToString(total_num_reachable);
-	int total_num_reachable_strlen = strlen(total_num_reachable_str);
-	int reachable_msglen = 9 + 1 + total_num_reachable_strlen + 1 + reachable_list_len;
-	char* reachable_msg = calloc(reachable_msglen + 1, sizeof(char));
-
-	//concat the reachable msg
-	strcat(reachable_msg, "REACHABLE");
-	strcat(reachable_msg, " ");
-	strcat(reachable_msg, total_num_reachable_str);
-	strcat(reachable_msg, " ");
-	strcat(reachable_msg, reachable_list);
-	reachable_msg[reachable_msglen] = '\0';
-
-	send(fd, reachable_msg, reachable_msglen, 0);
+	send(fd, reachable_msg, strlen(reachable_msg), 0);
 
 	free(reachable_list);
 	free(reachable_msg);
+}
+
+void addReachableSensorsAndStationsToReachableList(char* reachable_list, int total_num_reachable, 
+	int num_reachable_sensors, int num_reachable_stations, Sensor* reachable_sensors,
+	 BaseStation* reachable_stations){
+	//add all reachable sensors
+	Sensor current_sensor;
+	int num_reachables_traversed = 0;
+	for(int i = 0; i < num_reachable_sensors; i++){
+		current_sensor = reachable_sensors[i];
+		sprintf(reachable_list + strlen(reachable_list), "%s %d %d", 
+			current_sensor.id, current_sensor.x, current_sensor.y);
+
+		if(num_reachables_traversed != total_num_reachable - 1)
+			sprintf(reachable_list + strlen(reachable_list), " ");
+
+		num_reachables_traversed++;
+	}
+
+	//add all the reachable base stations
+	BaseStation current_station;
+	for(int i = 0; i < num_reachable_stations; i++){
+		current_station = reachable_stations[i];
+		sprintf(reachable_list + strlen(reachable_list), "%s %d %d", 
+			current_station.id, current_station.x, current_station.y);
+
+		if(num_reachables_traversed != total_num_reachable - 1)
+			sprintf(reachable_list + strlen(reachable_list), " ");
+
+		num_reachables_traversed++;
+	}
 }
 
 float getDistance(float x1, float y1, float x2, float y2){
