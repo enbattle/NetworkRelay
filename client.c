@@ -482,7 +482,7 @@ int main(int argc, char* argv[]) {
 
 			// Send message to the CONTROL server
 			// Create the message that needs to be sent to the control server
-			sprintf(message, "DATAMESSAGE %s %s %s 0", sensorID, closest, destination);
+			sprintf(message, "DATAMESSAGE %s %s %s 1  %s", sensorID, closest, destination, sensorID);
 
 			// Send the DATAMESSAGE to the server
 			int bytes = send(sd, message, strlen(message), 0);
