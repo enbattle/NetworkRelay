@@ -1018,18 +1018,24 @@ Sensor* getClosestValidSensor(char* hoplist, int hoplist_len, char* destination_
 	Sensor sensor;
 	for(int i = 0; i < num_sensors; i++){
 		sensor = sensors[i];
+		printf("Iteration for sensor: %s\n", sensor.id);
 		if(stationIsInRange(station, sensor) && (hoplist_len == 0 || !inHopList(sensor.id, hoplist, hoplist_len))){
 			sensor_distance = getDistanceToStationOrSensor(sensor.x, sensor.y, destination_is_station,
 				destination_sensor, destination_station);
+			printf("hoplist_len: %d, inHopList returned %d for sensor %s\n",
+			 hoplist_len, inHopList(sensor.id, hoplist, hoplist_len), sensor.id);
 
 			if(closest_sensor == NULL || sensor_distance < closest_sensor_distance){
 				closest_sensor_distance = sensor_distance;
-				closest_sensor = &sensor;
+				closest_sensor = &(sensors[i]);
+		 		printf("Just found new closest sensor with id: %s\n", closest_sensor->id);
 			}
 		}
 	}
-	if(closest_sensor != NULL)
+	if(closest_sensor != NULL){
+		printf("About to return closest sensor with id: %s\n", closest_sensor->id);
 		return getSensor(closest_sensor->id);
+	}
 	return NULL;
 }
 
