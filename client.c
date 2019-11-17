@@ -23,6 +23,7 @@ typedef struct {
 	int xPosition;
 	int yPosition;
 	float distance;
+	float distanceFromDestination;
 } ReachableList;
 
 int numReachable = 0;
@@ -216,6 +217,35 @@ void* childThread(void* someArgument) {
 							printf("Received from server: %s\n", buffer);
 						}
 
+						// Break down THERE message
+						token = strtok(buffer, " ");
+						token = strtok(NULL, " ");
+
+						int destinationXPosition = 0;
+						int destinationYPosition = 0;
+
+						// Get the coordinates of the destinationID
+						int value = 0;
+						while(token != NULL) {
+							if(value == 0) {
+								value = 1;
+								continue;
+							}
+							else if(value == 1) {
+								destinationXPosition = atoi(token);
+								value = 2;
+							}
+							else {
+								destinationYPosition = atoi(token);
+							}
+							token = strtok(NULL, " ");
+						}
+
+						for(i=0; i<numReachable; i++) {
+							reachables[i].distanceFromDestination = getDistance(clientXPosition, 
+								clientYPosition, destinationXPosition, destinationYPosition);
+						}
+
 						// Find the distances for all of the reachable bases/sensors
 						// Make sure that the sensor/base is not already part of the hoplist
 						// To prevent infinite loops
@@ -224,7 +254,7 @@ void* childThread(void* someArgument) {
 						int nextYPosition = 0;
 						char closest[BUFFER];
 						for(i=0; i<numReachable; i++) {
-							if(reachables[i].distance < minDistance) {
+							if(reachables[i].distanceFromDestination < minDistance) {
 								int found = 0;
 
 								for(j=0; j<hopReachable; j++) {
@@ -319,18 +349,44 @@ void* childThread(void* someArgument) {
 				}
 			}
 
-			else if(strcmp(token, "THERE")) {
+			else if(strcmp(token, "THERE") == 0) {
 				if(!parentSendData) {
 					continue;
 				}
 				else {
+					token = strtok(NULL, " ");
 					char message[BUFFER];
+
+					int destinationXPosition = 0;
+					int destinationYPosition = 0;
+
+					// Get the coordinates of the destinationID
+					int value = 0;
+					while(token != NULL) {
+						if(value == 0) {
+							value = 1;
+							continue;
+						}
+						else if(value == 1) {
+							destinationXPosition = atoi(token);
+							value = 2;
+						}
+						else {
+							destinationYPosition = atoi(token);
+						}
+						token = strtok(NULL, " ");
+					}
+
+					for(i=0; i<numReachable; i++) {
+						reachables[i].distanceFromDestination = getDistance(clientXPosition, 
+							clientYPosition, destinationXPosition, destinationYPosition);
+					}
 
 					// Find the distances for all of the reachable bases/sensors
 					float minDistance = INFINITY;
 					char closest[BUFFER];
 					for(i=0; i<numReachable; i++) {
-						if(reachables[i].distance < minDistance) {
+						if(reachables[i].distanceFromDestination < minDistance) {
 							minDistance = reachables[i].distance;
 							strcpy(closest, reachables[i].reachableID);
 						}
@@ -352,7 +408,6 @@ void* childThread(void* someArgument) {
 					}
 
 					parentSendData = 0;
-
 				}
 			}
 		}
@@ -476,6 +531,7 @@ int main(int argc, char* argv[]) {
 		else if(strcmp(token, "SENDDATA") == 0) {
 			token = strtok(NULL, " ");
 
+			// Let child know that the parent wants to send data
 			parentSendData = 1;
 
 			updatePosition(sd, sensorID, sensorRange, xPosition, yPosition);
