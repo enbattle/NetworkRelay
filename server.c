@@ -839,11 +839,14 @@ void handleMessageAsBaseStation(DataMessage* dm_struct, char* data_message, bool
 	BaseStation station = *station_ptr;
 	BaseStation** station_links = getStationLinks(station);
 	printf("IN handleMessageAsBaseStation. Station: %s\n", station.id);
+	printf("Trying to send message from: %s to: %s current next id is: %s hoplist_len: %d, hoplist: %s\n",
+		dm_struct->origin_id, dm_struct->destination_id, dm_struct->next_id, dm_struct->hoplist_len,
+		dm_struct->hoplist);
 
 	//check if this is the destination
 	char* destination_id = dm_struct->destination_id;
 	if(strcmp(station.id, destination_id) == 0){
-		printf("Message from %s to %s successfully received.\n", station.id, destination_id);
+		printf("Message from %s to %s successfully received.\n", dm_struct->origin_id, destination_id);
 		return;
 	}
 
@@ -902,6 +905,8 @@ void handleMessageAsBaseStation(DataMessage* dm_struct, char* data_message, bool
 			sprintf(data_message, "DATAMESSAGE  %s  %s  %s  %d  %s", dm_struct->origin_id, 
 				dm_struct->next_id, dm_struct->destination_id, dm_struct->hoplist_len,
 				dm_struct->hoplist);
+			printf("Message from %s to %s being forwarded through %s\n", dm_struct->origin_id, 
+				dm_struct->destination_id, dm_struct->next_id);
 			handleMessageAsBaseStation(dm_struct, data_message, destination_is_station);
 
 		}else if(closest_sensor_distance < closest_link_distance){
@@ -948,6 +953,8 @@ void handleMessageAsBaseStation(DataMessage* dm_struct, char* data_message, bool
 		sprintf(data_message, "DATAMESSAGE  %s  %s  %s  %d  %s", dm_struct->origin_id, 
 			dm_struct->next_id, dm_struct->destination_id, dm_struct->hoplist_len,
 			dm_struct->hoplist);
+		printf("Message from %s to %s being forwarded through %s\n", dm_struct->origin_id, 
+			dm_struct->destination_id, dm_struct->next_id);
 		handleMessageAsBaseStation(dm_struct, data_message, destination_is_station);		
 
 	}else{
@@ -978,11 +985,11 @@ BaseStation* getBaseStation(char* id){
 			break;
 		}
 	}
-	printf("This is the station id: %s with len: %lu\n", id, strlen(id));
-	if(station == NULL)
-		printf("Station was null\n");
-	else
-		printf("About to return station with id: %s\n", station->id);
+	// printf("This is the station id: %s with len: %lu\n", id, strlen(id));
+	// if(station == NULL)
+	// 	printf("Station was null\n");
+	// else
+	// 	printf("About to return station with id: %s\n", station->id);
 	return station;
 }
 
@@ -1062,22 +1069,25 @@ bool stationIsInRange(BaseStation station, Sensor sensor){
 
 bool inHopList(char* id, char* hoplist, int hoplist_len){
 	//add each id from hoplist into array
-	char* token = strtok(hoplist, " ");
-	char** hoplist_ids = calloc(hoplist_len, sizeof(char*));
-	int num_ids_read = 0;
-	while(token != NULL) {
-		hoplist_ids[num_ids_read] = calloc(MAX_BUFFER, sizeof(char));
-		strcpy(hoplist_ids[num_ids_read], token);
-		num_ids_read++;
-		token = strtok(NULL, " ");
-	}
-	//check if id is in array of hoplist ids
-	for(int i = 0; i < hoplist_len; i++){
-		if(strcmp(id, hoplist_ids[i]) == 0){
-			return true;
-		}
-	}
-	return false;
+	// char* token = strtok(hoplist, " ");
+	// char** hoplist_ids = calloc(hoplist_len, sizeof(char*));
+	// int num_ids_read = 0;
+	// while(token != NULL) {
+	// 	hoplist_ids[num_ids_read] = calloc(MAX_BUFFER, sizeof(char));
+	// 	strcpy(hoplist_ids[num_ids_read], token);
+	// 	num_ids_read++;
+	// 	token = strtok(NULL, " ");
+	// }
+	// //check if id is in array of hoplist ids
+	// for(int i = 0; i < hoplist_len; i++){
+	// 	printf("ID: %s\n", id);
+	// 	printf("hoplist_ids[%d]: %s\n", i, hoplist_ids[i]);
+	// 	if(strcmp(id, hoplist_ids[i]) == 0){
+	// 		return true;
+	// 	}
+	// }
+	// return false;
+	return (strstr(hoplist, id) != NULL);
 }
 
 Client getClientBySensorID(char* sensor_id){
