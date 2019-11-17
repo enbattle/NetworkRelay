@@ -63,7 +63,7 @@ void updatePosition(int sd, char* sensorID, int sensorRange, int xPosition, int 
 	// Send the UPDATEDPOSITION to the control server
 	int bytes = send(sd, message, strlen(message), 0);
 	if(bytes < strlen(message)) {
-		fprintf(stderr, "ERROR: Could not send update position message to server!\n");
+		fprintf(stderr, "ERROR: Could not send UPDATEPOSITION message to server!\n");
 		return exit(1);
 	}
 
@@ -71,7 +71,7 @@ void updatePosition(int sd, char* sensorID, int sensorRange, int xPosition, int 
 	bytes = recv(sd, buffer, BUFFER, 0);
 
 	if(bytes < 0) {
-		fprintf(stderr, "ERROR: Could not receive update position response from server!\n");
+		fprintf(stderr, "ERROR: Could not receive UPDATEPOSITION response from server!\n");
 		return exit(1);
 	}
 	else if(bytes == 0) {
@@ -150,11 +150,12 @@ void* childThread(void* someArgument) {
 		// Wait on DATAMESSAGE from the server
 		int bytes = recv(clientsd, buffer, BUFFER, 0);
 		if(bytes < 0) {
-			fprintf(stderr, "ERROR: Could not receive update position response from server!\n");
+			fprintf(stderr, "ERROR: Could not receive UPDATEPOSITION response from server!\n");
 			exit(1);
 		}
 		else if(bytes == 0) {
 			printf("Received no data. Server socket seems to have closed!\n");
+			exit(1);
 		}
 		else {
 			buffer[bytes] = '\0';
@@ -174,7 +175,7 @@ void* childThread(void* someArgument) {
 
 		char* token = strtok(buffer, " ");
 		if(strcmp(token, "DATAMESSAGE") == 0) {
-			token = strtok(buffer, " ");
+			token = strtok(NULL, " ");
 			int value = 0;
 
 			while(token != NULL) {
@@ -340,9 +341,6 @@ void* childThread(void* someArgument) {
 			// Free the hop list
 			free(hopList);
 		}
-		else {
-			printf("ERROR: Did not receive DATAMESSAGE from CONTROL server!\n");
-		}
 	}
 }
 
@@ -378,6 +376,13 @@ int main(int argc, char* argv[]) {
 		return EXIT_FAILURE;
 	}
 
+	// Save information as global variables
+	clientsd = sd;
+	strcpy(clientSensorID, sensorID);
+	clientSensorRange = sensorRange;
+	clientXPosition = xPosition;
+	clientYPosition = yPosition;
+
 	// Get the host
 	struct hostent * host = gethostbyname(controlHost);
 	if(host == NULL) {
@@ -405,13 +410,6 @@ int main(int argc, char* argv[]) {
 	// Parent --- handles the input commands from the user
 	// Child --- handles the receiving of messages from the server
 	pthread_t tid;
-
-	// Save information as global variables
-	clientsd = sd;
-	strcpy(clientSensorID, sensorID);
-	clientSensorRange = sensorRange;
-	clientXPosition = xPosition;
-	clientYPosition = yPosition;
 
 	int status = pthread_create(&tid, NULL, childThread, NULL);
 	if(status != 0) {
@@ -462,12 +460,12 @@ int main(int argc, char* argv[]) {
 		}
 
 		else if(strcmp(token, "SENDDATA") == 0) {
+			token = strtok(NULL, " ");
 			char destination[BUFFER];
 
 			updatePosition(sd, sensorID, sensorRange, xPosition, yPosition);
 
 			// Generate a new DATAMESSAGE with destination of DestinationID
-			token = strtok(NULL, " ");
 			strcpy(destination, token);
 
 			// Find the distances for all of the reachable bases/sensors
@@ -489,7 +487,7 @@ int main(int argc, char* argv[]) {
 			// Send the DATAMESSAGE to the server
 			int bytes = send(sd, message, strlen(message), 0);
 			if(bytes < strlen(message)) {
-				fprintf(stderr, "ERROR: Could not send update position message to server!\n");
+				fprintf(stderr, "ERROR: Could not send UPDATEPOSITION message to server!\n");
 				return EXIT_FAILURE;
 			}
 		}

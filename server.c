@@ -678,7 +678,7 @@ void createSensor(char* sensor_id, int sensor_range, int x_pos, int y_pos){
 	if(num_sensors == 0)
 		sensors = calloc(1,sizeof(Sensor));
 	else
-		sensors = reallocarray(sensors, num_sensors + 1, sizeof(Sensor));
+		sensors = realloc(sensors, sizeof(Sensor) * (num_sensors + 1));
 
 	sensors[num_sensors].id = calloc(strlen(sensor_id) + 1, sizeof(char));
 	strcpy(sensors[num_sensors].id, sensor_id);
