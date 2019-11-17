@@ -427,6 +427,7 @@ int main(int argc, char* argv[]) {
 		// Wait for user to enter a command
 		printf("Please enter a command: ");
 		fgets(command, BUFFER, stdin);
+		command[strlen(command)-1] = '\0';
 
 		// If command is MOVE
 		// -- send update position message from client to server, and client waits for response

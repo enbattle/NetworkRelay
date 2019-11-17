@@ -82,7 +82,7 @@ void handleDataMsg(char buffer[]);
 char* parseWhereMsg(char buffer[]);
 Sensor* parseUpdatePositionMsg(char buffer[]);
 int getSensorIndex(char* sensor_id);
-Sensor updateSensorPosition(char* sensor_id, int x, int y);
+Sensor updateSensorPosition(char* sensor_id, int sensor_range, int x, int y);
 void createSensor(char* sensor_id, int sensor_range, int x_pos, int y_pos);
 char* intToString(int num);
 void sendThereMessage(int fd, char* node_id);
@@ -257,7 +257,7 @@ void handleSendData(char stdin_buffer[]){
 	char* origin_id = orig_and_dest->origin_id;
 	char* destination_id = orig_and_dest->destination_id;
 
-	DataMessage* msg = malloc(sizeof(DataMessage));
+	// DataMessage* msg = malloc(sizeof(DataMessage));
 	if(strcmp(origin_id, "CONTROL") == 0){
 
 		Sensor* destination_sensor_ptr = getSensor(destination_id);
@@ -379,8 +379,8 @@ void* listenForConnections(void* p){
 	    printf("Server: listening for TCP connections on port: %d\n", controlPort); 
 
 	int fromlen = sizeof( client );
-	char buffer[ MAX_BUFFER ];
-	int n;
+	// char buffer[ MAX_BUFFER ];
+	// int n;
 
 	while(1){
 		FD_ZERO( &readfds ); //initializes the file descriptor set
@@ -474,6 +474,9 @@ void* handleSensor(void* p){
 
 		}
 	}
+
+	// Exit the current connection
+	pthread_exit(p);
 }
 
 void handleDataMsg(char buffer[]){
@@ -552,7 +555,7 @@ void handleUpdatePosition(int fd, char buffer[], int client_index){
 	}else{
 
 		if(getSensor(sensor_id) != NULL){ 
-			new_sensor = updateSensorPosition(sensor_id, x, y);
+			new_sensor = updateSensorPosition(sensor_id, sensor_range, x, y);
 		}else{
 			createSensor(sensor_id, sensor_range, x, y);
 			new_sensor = sensors[num_sensors-1];
@@ -648,8 +651,9 @@ int getSensorIndex(char* sensor_id){
 	return -1;
 }
 
-Sensor updateSensorPosition(char* sensor_id, int x, int y){
+Sensor updateSensorPosition(char* sensor_id, int sensor_range, int x, int y){
 	int index = getSensorIndex(sensor_id);
+	sensors[index].range = sensor_range;
 	sensors[index].x = x;
 	sensors[index].y = y;
 	return sensors[index];
