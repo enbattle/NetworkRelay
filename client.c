@@ -48,13 +48,7 @@ float getDistance(float x1, float y1, float x2, float y2){
 // Function that updates the CONTROL server on the new position of the SENSOR
 void updatePosition(int sd, char* sensorID, int sensorRange, int xPosition, int yPosition) {
 
-	// Lock the mutex so that there is no conflict between multiple updatePosition calls
-	pthread_mutex_lock(&lock);
-
 	char message[BUFFER];
-	char buffer[BUFFER];
-
-	int i;
 
 	// Create the message that needs to be sent to the control server
 	sprintf(message, "UPDATEPOSITION %s %d %d %d", sensorID, sensorRange, 
@@ -67,76 +61,9 @@ void updatePosition(int sd, char* sensorID, int sensorRange, int xPosition, int 
 		return exit(1);
 	}
 
-	// Should receive a REACHABLE message from the server
-	bytes = recv(sd, buffer, BUFFER, 0);
 
-	if(bytes < 0) {
-		fprintf(stderr, "ERROR: Could not receive UPDATEPOSITION response from server!\n");
-		return exit(1);
-	}
-	else if(bytes == 0) {
-		printf("Received no data. Server socket seems to have closed!\n");
-	}
-	else {
-		buffer[bytes] = '\0';
-		printf("Received from server: %s\n", buffer);
-
-		// Receive the REACHABLE message from the server after UPDATEPOSITION message was sent
-		// Store all reachable points in global list of structs
-		char* token = strtok(buffer, " ");
-		if(strcmp(token, "REACHABLE") == 0) {
-			token = strtok(NULL, " ");
-
-			numReachable = atoi(token);
-			int value = 0;
-			ReachableList newEntry;
-
-			reachables = (ReachableList*)calloc(numReachable, sizeof(ReachableList));
-
-			token = strtok(NULL, " ");
-			while(token != NULL) {
-				if(value == 0) {
-					strcpy(newEntry.reachableID, token);
-					value = 1;
-				}
-				else if(value == 1) {
-					newEntry.xPosition = atoi(token);
-					value = 2;
-				}
-				else {
-					newEntry.yPosition = atoi(token);
-					value = 3;
-				}
-				if(value == 3) {
-					// Find the distance between the current client and the sensor/base
-					float distance = getDistance(xPosition, yPosition, newEntry.xPosition, 
-						newEntry.yPosition);
-
-					newEntry.distance = distance;
-					reachables[reachableCounter++] = newEntry;
-					value = 0;
-				}
-				token = strtok(NULL, " ");
-			}
-
-			// Reset the reachable list counter
-			reachableCounter = 0;
-
-			// Debugging print statement
-			printf("Reachables:\n");
-			for(i=0; i<numReachable; i++) {
-				printf("\t%s %d %d\n", reachables[i].reachableID, reachables[i].xPosition,
-					reachables[i].yPosition);
-			}
-		}
-		else {
-			fprintf(stderr, "ERROR: Did not receive REACHABLE message from server!\n");
-			exit(1);
-		}
-	}
-
-	// Unlock the mutex
-	pthread_mutex_unlock(&lock);
+	// CHILD RECEIVES THE UPDATED POSITION RESPONSE IN ORDER TO UPDATE ALL CURRENT
+	// POSITIONS
 }
 
 void* childThread(void* someArgument) {
@@ -149,6 +76,7 @@ void* childThread(void* someArgument) {
 
 		// Wait on DATAMESSAGE from the server
 		int bytes = recv(clientsd, buffer, BUFFER, 0);
+
 		if(bytes < 0) {
 			fprintf(stderr, "ERROR: Could not receive UPDATEPOSITION response from server!\n");
 			exit(1);
@@ -340,6 +268,57 @@ void* childThread(void* someArgument) {
 				// Free the hop list
 				free(hopList);
 			}
+			// Receive the REACHABLE message from the server after UPDATEPOSITION message was sent
+			// Store all reachable points in global list of structs
+			else if(strcmp(token, "REACHABLE") == 0) {
+				token = strtok(NULL, " ");
+
+				numReachable = atoi(token);
+				int value = 0;
+				ReachableList newEntry;
+
+				reachables = (ReachableList*)calloc(numReachable, sizeof(ReachableList));
+
+				token = strtok(NULL, " ");
+				while(token != NULL) {
+					if(value == 0) {
+						strcpy(newEntry.reachableID, token);
+						value = 1;
+					}
+					else if(value == 1) {
+						newEntry.xPosition = atoi(token);
+						value = 2;
+					}
+					else {
+						newEntry.yPosition = atoi(token);
+						value = 3;
+					}
+					if(value == 3) {
+						// Find the distance between the current client and the sensor/base
+						float distance = getDistance(clientXPosition, clientYPosition, 
+							newEntry.xPosition, newEntry.yPosition);
+
+						newEntry.distance = distance;
+						reachables[reachableCounter++] = newEntry;
+						value = 0;
+					}
+					token = strtok(NULL, " ");
+				}
+
+				// Reset the reachable list counter
+				reachableCounter = 0;
+
+				// Debugging print statement
+				printf("Reachables:\n");
+				for(i=0; i<numReachable; i++) {
+					printf("\t%s %d %d\n", reachables[i].reachableID, reachables[i].xPosition,
+						reachables[i].yPosition);
+				}
+			}
+
+			else if(strcmp(token, "THERE")) {
+				continue;
+			}
 		}
 	}
 }
@@ -403,9 +382,6 @@ int main(int argc, char* argv[]) {
 		return EXIT_FAILURE;
 	}
 
-	// The initial UPDATEPOSITION message sent to the CONTROL SERVER
-	updatePosition(sd, sensorID, sensorRange, xPosition, yPosition);
-
 	// Use fork to create a child process
 	// Parent --- handles the input commands from the user
 	// Child --- handles the receiving of messages from the server
@@ -417,13 +393,16 @@ int main(int argc, char* argv[]) {
 		return EXIT_FAILURE;
 	}
 
+	// The initial UPDATEPOSITION message sent to the CONTROL SERVER
+	updatePosition(sd, sensorID, sensorRange, xPosition, yPosition);
+
 	while(1) {
 		char command[BUFFER];
 		char message[BUFFER];
-		char buffer[BUFFER];
 
 		// Wait for user to enter a command
-		printf("Please enter a command: ");
+		// printf("Please enter a command: ");
+
 		fgets(command, BUFFER, stdin);
 		command[strlen(command)-1] = '\0';
 
@@ -508,21 +487,7 @@ int main(int argc, char* argv[]) {
 				return EXIT_FAILURE;
 			}
 
-			// Should receive a THERE message from the server
-			bytes = recv(sd, buffer, BUFFER, 0);
-
-			if(bytes < 0) {
-				fprintf(stderr, "ERROR: Could not receive THERE response from server!\n");
-				return EXIT_FAILURE;
-			}
-			else if(bytes == 0) {
-				printf("Received no data. Server socket seems to have closed!\n");
-			}
-			else {
-				buffer[bytes] = '\0';
-				printf("Received from server: %s\n", buffer);
-			}
-
+			// CHILD THREAD HANDLES RECEIVING THE "THERE" MESSAGE
 		}
 
 		else if (strcmp(token, "UPDATEPOSITION") == 0) {
