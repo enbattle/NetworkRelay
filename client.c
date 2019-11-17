@@ -398,6 +398,9 @@ int main(int argc, char* argv[]) {
 		return EXIT_FAILURE;
 	}
 
+	// The initial UPDATEPOSITION message sent to the CONTROL SERVER
+	updatePosition(sd, sensorID, sensorRange, xPosition, yPosition);
+
 	// Use fork to create a child process
 	// Parent --- handles the input commands from the user
 	// Child --- handles the receiving of messages from the server
@@ -416,9 +419,6 @@ int main(int argc, char* argv[]) {
 		return EXIT_FAILURE;
 	}
 
-	// The initial UPDATEPOSITION message sent to the CONTROL SERVER
-	updatePosition(sd, sensorID, sensorRange, xPosition, yPosition);
-
 	while(1) {
 		char command[BUFFER];
 		char message[BUFFER];
@@ -426,7 +426,7 @@ int main(int argc, char* argv[]) {
 
 		// Wait for user to enter a command
 		printf("Please enter a command: ");
-		scanf("%s", command);
+		fgets(command, BUFFER, stdin);
 
 		// If command is MOVE
 		// -- send update position message from client to server, and client waits for response
@@ -504,7 +504,7 @@ int main(int argc, char* argv[]) {
 			// Send the WHERE message to the control server
 			int bytes = send(sd, message, strlen(message), 0);
 			if(bytes < strlen(message)) {
-				fprintf(stderr, "ERROR: Could not send update position message to server!\n");
+				fprintf(stderr, "ERROR: Could not send UPDATEPOSITION message to server!\n");
 				return EXIT_FAILURE;
 			}
 
@@ -512,7 +512,7 @@ int main(int argc, char* argv[]) {
 			bytes = recv(sd, buffer, BUFFER, 0);
 
 			if(bytes < 0) {
-				fprintf(stderr, "ERROR: Could not receive update position response from server!\n");
+				fprintf(stderr, "ERROR: Could not receive THERE response from server!\n");
 				return EXIT_FAILURE;
 			}
 			else if(bytes == 0) {
@@ -522,6 +522,7 @@ int main(int argc, char* argv[]) {
 				buffer[bytes] = '\0';
 				printf("Received from server: %s\n", buffer);
 			}
+
 		}
 
 		else if (strcmp(token, "UPDATEPOSITION") == 0) {
