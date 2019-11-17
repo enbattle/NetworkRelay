@@ -905,6 +905,8 @@ void handleMessageAsBaseStation(DataMessage* dm_struct, char* data_message, bool
 			sprintf(data_message, "DATAMESSAGE  %s  %s  %s  %d  %s", dm_struct->origin_id, 
 				dm_struct->next_id, dm_struct->destination_id, dm_struct->hoplist_len,
 				dm_struct->hoplist);
+			printf("Message from %s to %s being forwarded through %s\n", dm_struct->origin_id, 
+				dm_struct->destination_id, dm_struct->next_id);
 			handleMessageAsBaseStation(dm_struct, data_message, destination_is_station);
 
 		}else if(closest_sensor_distance < closest_link_distance){
@@ -951,6 +953,8 @@ void handleMessageAsBaseStation(DataMessage* dm_struct, char* data_message, bool
 		sprintf(data_message, "DATAMESSAGE  %s  %s  %s  %d  %s", dm_struct->origin_id, 
 			dm_struct->next_id, dm_struct->destination_id, dm_struct->hoplist_len,
 			dm_struct->hoplist);
+		printf("Message from %s to %s being forwarded through %s\n", dm_struct->origin_id, 
+			dm_struct->destination_id, dm_struct->next_id);
 		handleMessageAsBaseStation(dm_struct, data_message, destination_is_station);		
 
 	}else{
@@ -981,11 +985,11 @@ BaseStation* getBaseStation(char* id){
 			break;
 		}
 	}
-	printf("This is the station id: %s with len: %lu\n", id, strlen(id));
-	if(station == NULL)
-		printf("Station was null\n");
-	else
-		printf("About to return station with id: %s\n", station->id);
+	// printf("This is the station id: %s with len: %lu\n", id, strlen(id));
+	// if(station == NULL)
+	// 	printf("Station was null\n");
+	// else
+	// 	printf("About to return station with id: %s\n", station->id);
 	return station;
 }
 
