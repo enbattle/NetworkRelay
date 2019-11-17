@@ -320,7 +320,7 @@ void* childThread(void* someArgument) {
 						sprintf(newHopList, "%s %d", newHopList, nextYPosition);
 
 						printf("%s: Message from %s to %s being forwarded through %s\n", clientSensorID, 
-							originID, destinationID, closest);
+							originID, destinationID, clientSensorID);
 
 						// Send message to the CONTROL server
 						// Create the message that needs to be sent to the control server
