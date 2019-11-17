@@ -24,6 +24,11 @@ typedef struct {
 	int i;
 } Index;
 
+typedef struct {
+	int fd; //fd associated with sensor id
+	char* sensor_id; 
+} Client;
+
 typedef struct{
 	char* id;
 	int x;
@@ -59,7 +64,7 @@ typedef struct {
 	char* next_id;
 	char* destination_id;
 	int hoplist_len;
-	char** hoplist;
+	char* hoplist;
 } DataMessage;
 
 void generateBaseStations(const char* baseStationFile);
@@ -72,7 +77,7 @@ BaseStation findStationClosestToSensor(Sensor sensor);
 void* listenForConnections(void* p);
 void* handleSensor(void* p);
 void handleWhere(int fd, char buffer[]);
-void handleUpdatePosition(int fd, char buffer[]);
+void handleUpdatePosition(int fd, char buffer[], int client_index);
 char* parseWhereMsg(char buffer[]);
 Sensor* parseUpdatePositionMsg(char buffer[]);
 int getSensorIndex(char* sensor_id);
@@ -89,16 +94,25 @@ void sendReachableMsg(int fd, int total_num_reachable, int num_reachable_sensors
 void addReachableSensorsAndStationsToReachableList(char* reachable_list, int total_num_reachable, 
 	int num_reachable_sensors, int num_reachable_stations, Sensor* reachable_sensors,
 	 BaseStation* reachable_stations);
+float getDistanceToStationOrSensor(float x1, float y1, bool destination_is_station,
+	Sensor destination_sensor, BaseStation destination_station);
 float getDistance(float x1, float y1, float x2, float y2);
-void handleMessageAsBaseStation(DataMessage* dm_struct, char* data_message);
+void handleMessageAsBaseStation(DataMessage* dm_struct, char* data_message, bool destination_is_station);
+BaseStation** getStationLinks(BaseStation station);
 BaseStation* getBaseStation(char* id);
+BaseStation* getClosestValidLink(char* hoplist, int hoplist_len, char* destination_id, bool destination_is_station,
+	BaseStation station, BaseStation** station_links, BaseStation destination_station, Sensor destination_sensor);
+Sensor* getClosestValidSensor(char* hoplist, int hoplist_len, char* destination_id, bool destination_is_station,
+	BaseStation station, BaseStation destination_station, Sensor destination_sensor);
 Sensor* getSensor(char* id);
 bool stationIsInRange(BaseStation station, Sensor sensor);
-bool inHopList(char* id, char** hoplist, int hoplist_len);
+bool inHopList(char* id, char* hoplist, int hoplist_len);
+Client getClientBySensorID(char* sensor_id);
 
 fd_set readfds; //keeps track of the sockets that 'select will listen for'
 unsigned short controlPort;
 int client_sockets[ MAX_STATIONS ]; /* client socket fd list */
+Client clients[ MAX_STATIONS ];
 int client_socket_index = 0;  /* next free spot */
 BaseStation* base_stations; //keeps track of all the base stations
 Sensor* sensors;
@@ -259,12 +273,21 @@ void handleSendData(char stdin_buffer[]){
 			DataMessage* dm_struct = malloc(sizeof(DataMessage));
 			dm_struct->origin_id = calloc(8, sizeof(char));
 			strcpy(dm_struct->origin_id, "CONTROL");
-			dm_struct->next_id = closest_station.id;
+			dm_struct->next_id = calloc(MAX_BUFFER, sizeof(char));
+			sprintf(dm_struct->next_id, "%s", closest_station.id);
 			dm_struct->destination_id = destination_id;
 			dm_struct->hoplist_len = 0;
+			dm_struct->hoplist = calloc(MAX_BUFFER, sizeof(char));
+
+			//check if the destination is a base station or sensor
+			bool destination_is_station = false;
+			BaseStation* destination_station_ptr = getBaseStation(destination_id);
+			Sensor* destination_sensor_ptr = getSensor(destination_id);
+			if(destination_station_ptr != NULL)
+				destination_is_station = true;
 
 			//send data message to closest station
-			handleMessageAsBaseStation(dm_struct, data_message);
+			handleMessageAsBaseStation(dm_struct, data_message, destination_is_station);
 
 		}else{
 			printf("Sensor not found\n");
@@ -310,7 +333,7 @@ BaseStation findStationClosestToSensor(Sensor sensor){
 	for(int i = 0; i < num_stations; i++){
 		station = base_stations[i];
 		distance = getDistance(station.x, station.y, sensor.x, sensor.y);
-		printf("distance to point (%d, %d) is: %f\n", sensor.x, sensor.y,
+		printf("station %s, distance to point (%d, %d) is: %f\n", station.id, sensor.x, sensor.y,
 			distance);
 		printf("%f\n", distance);
 		if(i == 0 || distance < min_distance){
@@ -387,8 +410,8 @@ void* handleSensor(void* p){
 	Index* ind = (Index*) p;
 	int index = ind->i;
 	int fd = client_sockets[ index ];
+	clients[index].fd = fd;
   	char buffer[ MAX_BUFFER ];
-
 
 	while(1){
 		printf("CHILD %lu: Blocking on recv\n", pthread_self());
@@ -416,6 +439,12 @@ void* handleSensor(void* p){
 			    {
 			      client_sockets[ m ] = client_sockets[ m + 1 ];
 			    }
+
+			    for(m = k; m < client_socket_index - 1; m++)
+			    {
+			    	clients[m].fd = clients[m + 1].fd;
+			    	clients[m].sensor_id = clients[m + 1].sensor_id;
+			    }
 			    client_socket_index--;
 			    break;  /* all done */
 			  }
@@ -436,7 +465,7 @@ void* handleSensor(void* p){
 			}else if(strstr(buffer, "UPDATEPOSITION") != NULL){
 
 				printf("recieved UPDATEPOSITION\n");
-				handleUpdatePosition(fd, buffer);
+				handleUpdatePosition(fd, buffer, index);
 
 			}else if(strstr(buffer, "DATAMESSAGE") != NULL){
 
@@ -467,7 +496,7 @@ void handleWhere(int fd, char buffer[]){
 	free(node_id);
 }
 
-void handleUpdatePosition(int fd, char buffer[]){
+void handleUpdatePosition(int fd, char buffer[], int client_index){
 	Sensor* sensor_ptr = parseUpdatePositionMsg(buffer);
 	char* sensor_id = sensor_ptr->id;
 	int sensor_range = sensor_ptr->range;
@@ -476,22 +505,24 @@ void handleUpdatePosition(int fd, char buffer[]){
 
 	Sensor new_sensor;
 	//Add sensor to array of sensors
+	pthread_mutex_lock(&lock);
 	if(num_sensors == 0){
 
 		createSensor(sensor_id, sensor_range, x, y);
 		new_sensor = sensors[num_sensors-1];
+		clients[client_index].sensor_id = sensors[num_sensors-1].id;
 
 	}else{
 
-		pthread_mutex_lock(&lock);
 		if(getSensor(sensor_id) != NULL){ 
 			new_sensor = updateSensorPosition(sensor_id, x, y);
 		}else{
 			createSensor(sensor_id, sensor_range, x, y);
 			new_sensor = sensors[num_sensors-1];
+			clients[client_index].sensor_id = sensors[num_sensors-1].id;
 		}
-		pthread_mutex_unlock(&lock);
 	}
+	pthread_mutex_unlock(&lock);
 
 	//Get reachable sensors and stations
 	SensorReachableInfo* sensor_info = getSensorReachableInfo(new_sensor);
@@ -749,100 +780,140 @@ void addReachableSensorsAndStationsToReachableList(char* reachable_list, int tot
 	}
 }
 
+float getDistanceToStationOrSensor(float x1, float y1, bool destination_is_station,
+	Sensor destination_sensor, BaseStation destination_station){
+	if(destination_is_station)
+		return getDistance(x1, y1, destination_station.x, destination_station.y);
+	else
+		return getDistance(x1, y1, destination_sensor.x, destination_sensor.y);
+}
+
 float getDistance(float x1, float y1, float x2, float y2){
 	return sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
 }
 
-void handleMessageAsBaseStation(DataMessage* dm_struct, char* data_message){
-	//get the current base station
+void handleMessageAsBaseStation(DataMessage* dm_struct, char* data_message, bool destination_is_station){
+	//get the current base station and its links
 	BaseStation* station_ptr = getBaseStation(dm_struct->next_id);
 	BaseStation station = *station_ptr;
+	BaseStation** station_links = getStationLinks(station);
+	printf("IN handleMessageAsBaseStation. Station: %s\n", station.id);
 
-	//get the links for this base station
-	BaseStation* station_links = calloc(station.num_links, sizeof(BaseStation));
-	// printf("num links for this station: %d\n", station.num_links);
-	for(int i = 0; i < station.num_links; i++){
-		// printf("This is id we are about to pass: %s, with len %lu\n", station.links[i],
-			// strlen(station.links[i]));
-		BaseStation* station_ptr = getBaseStation(station.links[i]);
-		station_links[i] = *station_ptr;
+	//check if this is the destination
+	char* destination_id = dm_struct->destination_id;
+	if(strcmp(station.id, destination_id) == 0){
+		printf("Message from %s to %s successfully received.\n", station.id, destination_id);
+		return;
 	}
 
-	//get the destination (either a sensor or a base station)
-	//first check in base stations
-	char* destination_id = dm_struct->destination_id;
-	bool destination_is_station = false;
-	BaseStation* destination_station_ptr = getBaseStation(destination_id);
-	Sensor* destination_sensor_ptr = getSensor(destination_id);
 	BaseStation destination_station;
 	Sensor destination_sensor;
-	if(destination_station_ptr == NULL){
-		destination_sensor = *destination_sensor_ptr;
-	}else{
-		destination_station = *destination_station_ptr;
-		destination_is_station = true;
-	}
-
-	//Figure out next move
-	//look at all possible options (base stations and sensors)
-	//remove those that would cause a cycle (in hoplist)
-	//send to closest thing
-
-	//find the link closest to the destination that is not in the hop list (no cycle)
-	char** hoplist = dm_struct->hoplist;
-	int hoplist_len = dm_struct->hoplist_len;
-	bool valid_link_found = false;
-	BaseStation closest_link;
-	float closest_link_distance, link_distance;
-	BaseStation link;
-	for(int i = 0; i < station.num_links; i++){
-		link = station_links[i];
-		if(!inHopList(link.id, hoplist, hoplist_len)){
-			if(destination_is_station)
-				link_distance = getDistance(link.x, link.y, destination_station.x, destination_station.y);
-			else
-				link_distance = getDistance(link.x, link.y, destination_sensor.x, destination_sensor.y);
-
-			if(!valid_link_found || link_distance < closest_link_distance){
-				closest_link_distance = link_distance;
-				closest_link = link;
-			}
-			valid_link_found = true;
-		}
-	}
-
-	if(valid_link_found)
-		printf("Valid link was found. Id: %s, distance: %f\n", closest_link.id, closest_link_distance);
+	if(destination_is_station)
+		destination_station = *(getBaseStation(dm_struct->destination_id));
 	else
-		printf("Valid link was not found. Either no links or all links were already in hoplist\n");
+		destination_sensor = *(getSensor(dm_struct->destination_id));
 
+	//get closest valid link or sensor (link or sensor not in the hoplist)
 	//if the destination is a station would a station ever send a message to a sensor?
+	char* hoplist = dm_struct->hoplist;
+	int hoplist_len = dm_struct->hoplist_len;
 
-	//find closest sensor not in hoplist
-	float closest_sensor_distance, sensor_distance;
-	bool valid_sensor_found = false;
-	Sensor sensor, closest_sensor;
-	for(int i = 0; i < num_sensors; i++){
-		sensor = sensors[i];
-		if(stationIsInRange(station, sensor) && !inHopList(sensor.id, hoplist, hoplist_len)){
-			if(destination_is_station)
-				sensor_distance = getDistance(sensor.x, sensor.y, destination_station.x, destination_station.y);
-			else
-				sensor_distance = getDistance(sensor.x, sensor.y, destination_sensor.x, destination_sensor.y);
-
-			if(!valid_sensor_found || sensor_distance < closest_sensor_distance){
-				closest_sensor_distance = sensor_distance;
-				closest_sensor = sensor;
-			}
-			valid_sensor_found = true;
-		}
+	BaseStation* closest_valid_link_ptr = getClosestValidLink(hoplist, hoplist_len, destination_id,
+		destination_is_station, station, station_links, destination_station, destination_sensor);
+	BaseStation closest_valid_link;
+	if(closest_valid_link_ptr != NULL){
+		printf("closest valid link id: %s\n", closest_valid_link_ptr->id);
+		closest_valid_link = *closest_valid_link_ptr;
+		printf("Valid link was found. Id: %s\n", closest_valid_link.id);
+	}else{
+		printf("Valid link was not found. Either no links or all links were already in hoplist\n");	
 	}
 
-	if(valid_sensor_found)
-		printf("Valid sensor was found. Id: %s, distance: %f\n", closest_sensor.id, closest_sensor_distance);
-	else
+	Sensor* closest_valid_sensor_ptr = getClosestValidSensor(hoplist, hoplist_len, destination_id,
+		destination_is_station, station, destination_station, destination_sensor);
+	Sensor closest_valid_sensor;
+	if(closest_valid_sensor_ptr != NULL){
+		closest_valid_sensor = *closest_valid_sensor_ptr;
+		printf("Valid sensor was found. Id: %s\n", closest_valid_sensor.id);
+	}else{
 		printf("Valid sensor was not found. Either no sensors or all sensors were already in hoplist\n");
+	}
 
+	//figure out which is closer (closest link or closest sensor)
+	float closest_link_distance, closest_sensor_distance;
+	if(closest_valid_link_ptr != NULL && closest_valid_sensor_ptr != NULL){
+
+		closest_link_distance = getDistanceToStationOrSensor(closest_valid_link.x, closest_valid_link.y,
+			destination_is_station, destination_sensor, destination_station);
+		closest_sensor_distance = getDistanceToStationOrSensor(closest_valid_sensor.x, closest_valid_sensor.y,
+			destination_is_station, destination_sensor, destination_station);
+
+		if(closest_link_distance < closest_sensor_distance){
+
+			strcpy(dm_struct->next_id, closest_valid_link.id);
+			dm_struct->hoplist_len++;
+			sprintf(dm_struct->hoplist + strlen(dm_struct->hoplist), "%s ", station.id);
+			sprintf(data_message, "DATAMESSAGE  %s  %s  %s  %d  %s", dm_struct->origin_id, 
+				dm_struct->next_id, dm_struct->destination_id, dm_struct->hoplist_len,
+				dm_struct->hoplist);
+			handleMessageAsBaseStation(dm_struct, data_message, destination_is_station);
+
+		}else if(closest_sensor_distance < closest_link_distance){
+
+			strcpy(dm_struct->next_id, closest_valid_sensor.id);
+			dm_struct->hoplist_len++;
+			sprintf(dm_struct->hoplist + strlen(dm_struct->hoplist), "%s ", station.id);
+			sprintf(data_message, "DATAMESSAGE %s %s %s %d %s", dm_struct->origin_id, 
+				dm_struct->next_id, dm_struct->destination_id, dm_struct->hoplist_len,
+				dm_struct->hoplist);
+			Client target_cli = getClientBySensorID(dm_struct->next_id);
+			printf("Client with fd %d is associated with sensor id: %s\n",
+				target_cli.fd, target_cli.sensor_id );
+			printf("Sending data message %s\n", data_message);
+			send(target_cli.fd, data_message, strlen(data_message), 0);
+
+		}else{
+			printf("They are equal distance away. What should I do?\n");
+		}
+
+	}else if(closest_valid_link_ptr == NULL && closest_valid_sensor_ptr != NULL){
+
+		strcpy(dm_struct->next_id, closest_valid_sensor.id);
+		dm_struct->hoplist_len++;
+		sprintf(dm_struct->hoplist + strlen(dm_struct->hoplist), "%s ", station.id);
+		sprintf(data_message, "DATAMESSAGE %s %s %s %d %s", dm_struct->origin_id, 
+			dm_struct->next_id, dm_struct->destination_id, dm_struct->hoplist_len,
+			dm_struct->hoplist);
+		Client target_cli = getClientBySensorID(dm_struct->next_id);
+		printf("Client with fd %d is associated with sensor id: %s\n",
+			target_cli.fd, target_cli.sensor_id );
+		printf("Sending data message %s\n", data_message);
+		send(target_cli.fd, data_message, strlen(data_message), 0);
+
+	}else if(closest_valid_link_ptr != NULL && closest_valid_sensor_ptr == NULL){
+
+		strcpy(dm_struct->next_id, closest_valid_link.id);
+		dm_struct->hoplist_len++;
+		sprintf(dm_struct->hoplist + strlen(dm_struct->hoplist), "%s ", station.id);
+		sprintf(data_message, "DATAMESSAGE  %s  %s  %s  %d  %s", dm_struct->origin_id, 
+			dm_struct->next_id, dm_struct->destination_id, dm_struct->hoplist_len,
+			dm_struct->hoplist);
+		handleMessageAsBaseStation(dm_struct, data_message, destination_is_station);		
+
+	}else{
+		printf("%s: Message from %s to %s could not be delivered.\n", station.id, 
+			dm_struct->origin_id, dm_struct->destination_id);
+	}
+
+}
+
+BaseStation** getStationLinks(BaseStation station){
+	BaseStation** station_links = calloc(station.num_links, sizeof(BaseStation*));
+	for(int i = 0; i < station.num_links; i++){
+		BaseStation* station_ptr = getBaseStation(station.links[i]);
+		station_links[i] = station_ptr;
+	}
+	return station_links;
 }
 
 BaseStation* getBaseStation(char* id){
@@ -859,6 +930,54 @@ BaseStation* getBaseStation(char* id){
 	}
 	return station;
 }
+
+//Returns the closest link to the provided station that is not the hoplist
+BaseStation* getClosestValidLink(char* hoplist, int hoplist_len, char* destination_id, bool destination_is_station,
+	BaseStation station, BaseStation** station_links, BaseStation destination_station, Sensor destination_sensor){
+	BaseStation* closest_link = NULL;
+	BaseStation link;
+	float closest_link_distance, link_distance;
+	for(int i = 0; i < station.num_links; i++){
+		link = *(station_links[i]);
+		if(!inHopList(link.id, hoplist, hoplist_len)){
+			link_distance = getDistanceToStationOrSensor(link.x, link.y, destination_is_station,
+				destination_sensor, destination_station);
+
+			if(closest_link == NULL || link_distance < closest_link_distance){
+				closest_link_distance = link_distance;
+				closest_link = &link;
+			}
+		}
+	}
+	if(closest_link != NULL)
+		return getBaseStation(closest_link->id);
+	return NULL;
+}
+
+//Returns the closest sensor to the provided station where the provided station is in 
+//the range of the sensor and the sensor is not in the hoplist
+Sensor* getClosestValidSensor(char* hoplist, int hoplist_len, char* destination_id, bool destination_is_station,
+	BaseStation station, BaseStation destination_station, Sensor destination_sensor){
+	float closest_sensor_distance, sensor_distance;
+	Sensor* closest_sensor = NULL;
+	Sensor sensor;
+	for(int i = 0; i < num_sensors; i++){
+		sensor = sensors[i];
+		if(stationIsInRange(station, sensor) && !inHopList(sensor.id, hoplist, hoplist_len)){
+			sensor_distance = getDistanceToStationOrSensor(sensor.x, sensor.y, destination_is_station,
+				destination_sensor, destination_station);
+
+			if(closest_sensor == NULL || sensor_distance < closest_sensor_distance){
+				closest_sensor_distance = sensor_distance;
+				closest_sensor = &sensor;
+			}
+		}
+	}
+	if(closest_sensor != NULL)
+		return getSensor(closest_sensor->id);
+	return NULL;
+}
+
 
 Sensor* getSensor(char* id){
 	Sensor* sensor = NULL;
@@ -880,11 +999,31 @@ bool stationIsInRange(BaseStation station, Sensor sensor){
 		&& station.y >= lower_bound && station.y <= upper_bound);
 }
 
-bool inHopList(char* id, char** hoplist, int hoplist_len){
+bool inHopList(char* id, char* hoplist, int hoplist_len){
+	//add each id from hoplist into array
+	char* token = strtok(hoplist, " ");
+	char** hoplist_ids = calloc(hoplist_len, sizeof(char*));
+	int num_ids_read = 0;
+	while(token != NULL) {
+		hoplist_ids[num_ids_read] = calloc(MAX_BUFFER, sizeof(char));
+		strcpy(hoplist_ids[num_ids_read], token);
+		num_ids_read++;
+		token = strtok(NULL, " ");
+	}
+	//check if id is in array of hoplist ids
 	for(int i = 0; i < hoplist_len; i++){
-		if(strcmp(id, hoplist[i]) == 0){
+		if(strcmp(id, hoplist_ids[i]) == 0){
 			return true;
 		}
 	}
 	return false;
+}
+
+Client getClientBySensorID(char* sensor_id){
+	for(int i = 0; i < client_socket_index; i++){
+		if(strcmp(clients[i].sensor_id, sensor_id) == 0)
+			return clients[i];
+	}
+	fprintf(stderr, "Client was not found for some reason\n");
+	exit(1);
 }
