@@ -360,6 +360,8 @@ void* childThread(void* someArgument) {
 									if(minDistance == reachables[i].distance){
 										if(reachables[i].reachableID < closest)
 											strcpy(closest, reachables[i].reachableID);
+									}else{
+											strcpy(closest, reachables[i].reachableID);	
 									}
 									minDistance = reachables[i].distance;
 									// nextXPosition = reachables[i].xPosition;
@@ -503,7 +505,9 @@ void* childThread(void* someArgument) {
 						if(reachables[i].isStation && reachables[i].distanceFromDestination <= minDistance) {
 							//resolve ties by choosing smaller id
 							if(reachables[i].distanceFromDestination == minDistance){
-								if(reachables[i].reachableID < closest)
+								if(strcmp(reachables[i].reachableID, closest) == -1)
+									strcpy(closest, reachables[i].reachableID);
+							}else{
 									strcpy(closest, reachables[i].reachableID);
 							}
 							printf("Found new min with id: %s and distance: %f\n", reachables[i].reachableID,

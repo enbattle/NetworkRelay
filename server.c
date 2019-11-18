@@ -1017,6 +1017,8 @@ BaseStation* getClosestValidLink(char* hoplist, int hoplist_len, char* destinati
 					printf("closest link id: %s\n", closest_link->id);
 					if(link.id < closest_link->id)
 						closest_link = station_links[i];
+				}else{
+					closest_link = station_links[i];
 				}
 				closest_link_distance = link_distance;
 				// printf("Found new closest link: %s\n", closest_link->id);
@@ -1048,6 +1050,8 @@ Sensor* getClosestValidSensor(char* hoplist, int hoplist_len, char* destination_
 				//resolve ties by choosing smaller id
 				if(sensor_distance == closest_sensor_distance){
 					if(sensor.id < closest_sensor->id)
+						closest_sensor = &(sensors[i]);
+				}else{
 						closest_sensor = &(sensors[i]);
 				}
 				closest_sensor_distance = sensor_distance;
