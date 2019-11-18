@@ -189,6 +189,74 @@ void* childThread(void* someArgument) {
 					else {
 						updatePosition(clientsd, clientSensorID, clientSensorRange, clientXPosition, clientYPosition);
 
+						// Should receive a REACHABLE message from the server
+						int updatebytes = recv(clientsd, buffer, BUFFER, 0);
+
+						if(updatebytes < 0) {
+							fprintf(stderr, "ERROR: Could not receive REACHABLE response from server!\n");
+							exit(1);
+						}
+						else if(updatebytes == 0) {
+							printf("Received no data. Server socket seems to have closed!\n");
+						}
+						else {
+							buffer[updatebytes] = '\0';
+							printf("Received from server: %s\n", buffer);
+
+							token = strtok(buffer, " ");
+							token = strtok(NULL, " ");
+
+							numReachable = atoi(token);
+							int value = 0;
+							ReachableList newEntry;
+
+							reachables = (ReachableList*)calloc(numReachable, sizeof(ReachableList));
+
+							token = strtok(NULL, " ");
+							while(token != NULL) {
+								if(value == 0) {
+									strcpy(newEntry.reachableID, token);
+									value = 1;
+								}
+								else if(value == 1) {
+									newEntry.xPosition = atoi(token);
+									value = 2;
+								}
+								else {
+									newEntry.yPosition = atoi(token);
+									value = 3;
+								}
+								if(value == 3) {
+									// Find the distance between the current client and the sensor/base
+									float distance = getDistance(clientXPosition, clientYPosition, 
+										newEntry.xPosition, newEntry.yPosition);
+
+									newEntry.distance = distance;
+
+									if(strstr(newEntry.reachableID, "base_station") == NULL) {
+										newEntry.isStation = 0;
+									}
+									else {
+										newEntry.isStation = 1;
+									}
+
+									reachables[reachableCounter++] = newEntry;
+									value = 0;
+								}
+								token = strtok(NULL, " ");
+							}
+
+							// Reset the reachable list counter
+							reachableCounter = 0;
+
+							// Debugging print statement
+							printf("Reachables:\n");
+							for(i=0; i<numReachable; i++) {
+								printf("\t%s %d %d\n", reachables[i].reachableID, reachables[i].xPosition,
+									reachables[i].yPosition);
+							}
+						}
+
 						// Implementing the WHERE message
 						char someID[BUFFER];
 						char message[BUFFER];
