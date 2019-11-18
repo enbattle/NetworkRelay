@@ -23,6 +23,7 @@ typedef struct {
 	int xPosition;
 	int yPosition;
 	float distance;
+	float distanceFromDestination;
 } ReachableList;
 
 int numReachable = 0;
@@ -34,6 +35,9 @@ char clientSensorID[BUFFER];
 int clientSensorRange = 0;
 int clientXPosition = 0;
 int clientYPosition = 0;
+
+int parentSendData = 0;
+char globalDestination[BUFFER];
 
 pthread_mutex_t lock;
 
@@ -78,7 +82,7 @@ void* childThread(void* someArgument) {
 		int bytes = recv(clientsd, buffer, BUFFER, 0);
 
 		if(bytes < 0) {
-			fprintf(stderr, "ERROR: Could not receive UPDATEPOSITION response from server!\n");
+			fprintf(stderr, "ERROR: Could not receive DATAMESSAGE response from server!\n");
 			exit(1);
 		}
 		else if(bytes == 0) {
@@ -194,7 +198,7 @@ void* childThread(void* someArgument) {
 						// Send the WHERE message to the control server
 						int bytes = send(clientsd, message, strlen(message), 0);
 						if(bytes < strlen(message)) {
-							fprintf(stderr, "ERROR: Could not send update position message to server!\n");
+							fprintf(stderr, "ERROR: Could not send WHERE message to server!\n");
 							exit(1);
 						}
 
@@ -202,7 +206,7 @@ void* childThread(void* someArgument) {
 						bytes = recv(clientsd, buffer, BUFFER, 0);
 
 						if(bytes < 0) {
-							fprintf(stderr, "ERROR: Could not receive update position response from server!\n");
+							fprintf(stderr, "ERROR: Could not receive THERE response from server!\n");
 							exit(1);
 						}
 						else if(bytes == 0) {
@@ -213,6 +217,35 @@ void* childThread(void* someArgument) {
 							printf("Received from server: %s\n", buffer);
 						}
 
+						// Break down THERE message
+						token = strtok(buffer, " ");
+						token = strtok(NULL, " ");
+
+						int destinationXPosition = 0;
+						int destinationYPosition = 0;
+
+						// Get the coordinates of the destinationID
+						int value = 0;
+						while(token != NULL) {
+							if(value == 0) {
+								value = 1;
+								continue;
+							}
+							else if(value == 1) {
+								destinationXPosition = atoi(token);
+								value = 2;
+							}
+							else {
+								destinationYPosition = atoi(token);
+							}
+							token = strtok(NULL, " ");
+						}
+
+						for(i=0; i<numReachable; i++) {
+							reachables[i].distanceFromDestination = getDistance(clientXPosition, 
+								clientYPosition, destinationXPosition, destinationYPosition);
+						}
+
 						// Find the distances for all of the reachable bases/sensors
 						// Make sure that the sensor/base is not already part of the hoplist
 						// To prevent infinite loops
@@ -221,7 +254,7 @@ void* childThread(void* someArgument) {
 						int nextYPosition = 0;
 						char closest[BUFFER];
 						for(i=0; i<numReachable; i++) {
-							if(reachables[i].distance < minDistance) {
+							if(reachables[i].distanceFromDestination < minDistance) {
 								int found = 0;
 
 								for(j=0; j<hopReachable; j++) {
@@ -258,7 +291,7 @@ void* childThread(void* someArgument) {
 						// Send the DATAMESSAGE to the server
 						bytes = send(clientsd, message, strlen(message), 0);
 						if(bytes < strlen(message)) {
-							fprintf(stderr, "ERROR: Could not send update position message to server!\n");
+							fprintf(stderr, "ERROR: Could not send DATAMESSAGE message to server!\n");
 							exit(1);
 						}
 
@@ -316,8 +349,66 @@ void* childThread(void* someArgument) {
 				}
 			}
 
-			else if(strcmp(token, "THERE")) {
-				continue;
+			else if(strcmp(token, "THERE") == 0) {
+				if(!parentSendData) {
+					continue;
+				}
+				else {
+					token = strtok(NULL, " ");
+					char message[BUFFER];
+
+					int destinationXPosition = 0;
+					int destinationYPosition = 0;
+
+					// Get the coordinates of the destinationID
+					int value = 0;
+					while(token != NULL) {
+						if(value == 0) {
+							value = 1;
+							continue;
+						}
+						else if(value == 1) {
+							destinationXPosition = atoi(token);
+							value = 2;
+						}
+						else {
+							destinationYPosition = atoi(token);
+						}
+						token = strtok(NULL, " ");
+					}
+
+					for(i=0; i<numReachable; i++) {
+						reachables[i].distanceFromDestination = getDistance(clientXPosition, 
+							clientYPosition, destinationXPosition, destinationYPosition);
+					}
+
+					// Find the distances for all of the reachable bases/sensors
+					float minDistance = INFINITY;
+					char closest[BUFFER];
+					for(i=0; i<numReachable; i++) {
+						if(reachables[i].distanceFromDestination < minDistance) {
+							minDistance = reachables[i].distance;
+							strcpy(closest, reachables[i].reachableID);
+						}
+					}
+
+					printf("Sent a new message bound for %s\n", globalDestination);
+
+					// Send message to the CONTROL server
+					// Create the message that needs to be sent to the control server
+					sprintf(message, "DATAMESSAGE %s %s %s 1 %s", clientSensorID, closest, 
+						globalDestination, clientSensorID);
+
+
+					// Send the DATAMESSAGE to the server
+					int bytes = send(clientsd, message, strlen(message), 0);
+					if(bytes < strlen(message)) {
+						fprintf(stderr, "ERROR: Could not send DATAMESSAGE message to server!\n");
+						exit(1);
+					}
+
+					parentSendData = 0;
+				}
 			}
 		}
 	}
@@ -331,7 +422,6 @@ int main(int argc, char* argv[]) {
 	}
 
 	setvbuf(stdout, NULL, _IONBF, 0);
-	int i;
 
 	if(pthread_mutex_init(&lock, NULL) != 0) {
 		fprintf(stderr, "ERROR: Could initiate pthread mutex!\n");
@@ -440,36 +530,29 @@ int main(int argc, char* argv[]) {
 
 		else if(strcmp(token, "SENDDATA") == 0) {
 			token = strtok(NULL, " ");
-			char destination[BUFFER];
+
+			// Let child know that the parent wants to send data
+			parentSendData = 1;
 
 			updatePosition(sd, sensorID, sensorRange, xPosition, yPosition);
 
-			// Generate a new DATAMESSAGE with destination of DestinationID
-			strcpy(destination, token);
+			// Send a WHERE message to get the destination coordinates
+			char someID[BUFFER];
+			strcpy(someID, token);
 
-			// Find the distances for all of the reachable bases/sensors
-			float minDistance = INFINITY;
-			char closest[BUFFER];
-			for(i=0; i<numReachable; i++) {
-				if(reachables[i].distance < minDistance) {
-					minDistance = reachables[i].distance;
-					strcpy(closest, reachables[i].reachableID);
-				}
-			}
+			// Save destinationID as global destination
+			strcpy(globalDestination, token);
 
-			printf("Sent a new message bound for %s\n", destination);
+			sprintf(message, "WHERE %s", someID);
 
-			// Send message to the CONTROL server
-			// Create the message that needs to be sent to the control server
-			sprintf(message, "DATAMESSAGE %s %s %s 1 %s", sensorID, closest, destination, sensorID);
-
-
-			// Send the DATAMESSAGE to the server
+			// Send the WHERE message to the control server
 			int bytes = send(sd, message, strlen(message), 0);
 			if(bytes < strlen(message)) {
-				fprintf(stderr, "ERROR: Could not send UPDATEPOSITION message to server!\n");
+				fprintf(stderr, "ERROR: Could not send WHERE message to server!\n");
 				return EXIT_FAILURE;
 			}
+
+			// CHILD THREAD HANDLES THE SENDING OF THE DATA MESSAGE
 		}
 
 		else if(strcmp(token, "WHERE") == 0) {
@@ -483,7 +566,7 @@ int main(int argc, char* argv[]) {
 			// Send the WHERE message to the control server
 			int bytes = send(sd, message, strlen(message), 0);
 			if(bytes < strlen(message)) {
-				fprintf(stderr, "ERROR: Could not send UPDATEPOSITION message to server!\n");
+				fprintf(stderr, "ERROR: Could not send WHERE message to server!\n");
 				return EXIT_FAILURE;
 			}
 
