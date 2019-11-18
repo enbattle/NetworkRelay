@@ -901,7 +901,7 @@ void handleMessageAsBaseStation(DataMessage* dm_struct, char* data_message, bool
 
 			strcpy(dm_struct->next_id, closest_valid_link.id);
 			dm_struct->hoplist_len++;
-			sprintf(dm_struct->hoplist + strlen(dm_struct->hoplist), "%s ", station.id);
+			sprintf(dm_struct->hoplist + strlen(dm_struct->hoplist), " %s ", station.id);
 			sprintf(data_message, "DATAMESSAGE  %s  %s  %s  %d  %s ", dm_struct->origin_id, 
 				dm_struct->next_id, dm_struct->destination_id, dm_struct->hoplist_len,
 				dm_struct->hoplist);
@@ -918,7 +918,7 @@ void handleMessageAsBaseStation(DataMessage* dm_struct, char* data_message, bool
 			strcpy(dm_struct->next_id, closest_valid_sensor.id);
 			dm_struct->hoplist_len++;
 			printf("This is the length of the hoplist %lu\n", strlen(dm_struct->hoplist));
-			sprintf(dm_struct->hoplist + strlen(dm_struct->hoplist), "%s ", station.id);
+			sprintf(dm_struct->hoplist + strlen(dm_struct->hoplist), " %s ", station.id);
 			sprintf(data_message, "DATAMESSAGE %s %s %s %d %s ", dm_struct->origin_id, 
 				dm_struct->next_id, dm_struct->destination_id, dm_struct->hoplist_len,
 				dm_struct->hoplist);
@@ -936,7 +936,7 @@ void handleMessageAsBaseStation(DataMessage* dm_struct, char* data_message, bool
 
 		strcpy(dm_struct->next_id, closest_valid_sensor.id);
 		dm_struct->hoplist_len++;
-		sprintf(dm_struct->hoplist + strlen(dm_struct->hoplist), "%s ", station.id);
+		sprintf(dm_struct->hoplist + strlen(dm_struct->hoplist), " %s ", station.id);
 		sprintf(data_message, "DATAMESSAGE %s %s %s %d %s ", dm_struct->origin_id, 
 			dm_struct->next_id, dm_struct->destination_id, dm_struct->hoplist_len,
 			dm_struct->hoplist);
@@ -950,7 +950,7 @@ void handleMessageAsBaseStation(DataMessage* dm_struct, char* data_message, bool
 
 		strcpy(dm_struct->next_id, closest_valid_link.id);
 		dm_struct->hoplist_len++;
-		sprintf(dm_struct->hoplist + strlen(dm_struct->hoplist), "%s ", station.id);
+		sprintf(dm_struct->hoplist + strlen(dm_struct->hoplist), " %s ", station.id);
 		sprintf(data_message, "DATAMESSAGE  %s  %s  %s  %d  %s ", dm_struct->origin_id, 
 			dm_struct->next_id, dm_struct->destination_id, dm_struct->hoplist_len,
 			dm_struct->hoplist);

@@ -22,6 +22,7 @@ typedef struct {
 	char reachableID[BUFFER];
 	int xPosition;
 	int yPosition;
+	int isStation;
 	float distance;
 	float distanceFromDestination;
 } ReachableList;
@@ -100,12 +101,14 @@ void* childThread(void* someArgument) {
 			int hopReachable = 0;
 			ReachableList* hopList;
 			int hopListCounter = 0;
+			char* hop_list = calloc(BUFFER, sizeof(char));
 
 			char newHopList[BUFFER];
 			strcpy(newHopList, "");
 
 			char* token = strtok(buffer, " ");
 			if(strcmp(token, "DATAMESSAGE") == 0) {
+				printf("IN DATAMESSAGE SECTION\n");
 				token = strtok(NULL, " ");
 				int value = 0;
 
@@ -128,40 +131,51 @@ void* childThread(void* someArgument) {
 						value = 4;
 					}
 					else {
-						token = strtok(NULL, " ");
-						int newValue = 0;
+						printf("IN ELSE SECTION. value: %d, token: %s\n", value, token);
+						sprintf(hop_list + strlen(hop_list), "%s ", token);
+					// 	token = strtok(NULL, " ");
+					// 	int newValue = 0;
 
-						ReachableList newHopEntry;
+					// 	ReachableList newHopEntry;
 
-						while(token != NULL){
-							if(newValue == 0) {
-								strcpy(newHopEntry.reachableID, token);
-								strcat(newHopList, token);
-								newValue = 1;
-							}
-							else if(newValue == 1) {
-								newHopEntry.xPosition = atoi(token);
-								strcat(newHopList, " ");
-								strcat(newHopList, token);
-								newValue = 2;
-							}
-							else {
-								newHopEntry.yPosition = atoi(token);
-								strcat(newHopList, " ");
-								strcat(newHopList, token);
-								newValue = 3;
-							}
-							if(newValue == 3) {
-								strcat(newHopList, " ");
-								hopList[hopListCounter++] = newHopEntry;
-								newValue = 0;
-							}
-							token = strtok(NULL, " ");
-						}	
-						value = 5;
+					// 	while(token != NULL){
+					// 		printf("I ENTERED SECOND WHILE LOOP\n");
+					// 		if(newValue == 0) {
+					// 			strcpy(newHopEntry.reachableID, token);
+					// 			strcat(newHopList, token);
+					// 			newValue = 1;
+					// 		}
+					// 		else if(newValue == 1) {
+					// 			newHopEntry.xPosition = atoi(token);
+					// 			strcat(newHopList, " ");
+					// 			strcat(newHopList, token);
+					// 			newValue = 2;
+					// 		}
+					// 		else {
+					// 			newHopEntry.yPosition = atoi(token);
+					// 			strcat(newHopList, " ");
+					// 			strcat(newHopList, token);
+					// 			newValue = 3;
+					// 		}
+					// 		if(newValue == 3) {
+					// 			strcat(newHopList, " ");
+					// 			// hopList[hopListCounter++] = newHopEntry;
+					// 			hopList[hopListCounter].xPosition = newHopEntry.xPosition;
+					// 			hopList[hopListCounter].yPosition = newHopEntry.yPosition;
+					// 			hopList[hopListCounter].isStation = newHopEntry.isStation;
+					// 			strcpy(hopList[hopListCounter].reachableID, newHopEntry.reachableID);
+					// 			printf("Inputting new reachableID: %s\n", hopList[hopListCounter].reachableID);
+					// 			hopListCounter++;
+					// 			newValue = 0;
+					// 		}
+					// 		token = strtok(NULL, " ");
+					// 	}	
+					// 	value = 5;
 					}
 					token = strtok(NULL, " ");
 				}
+
+				printf("OUTSIDE OF WHILE LOOPS. hopListCounter: %d, hoplist: %s\n", hopListCounter, hop_list);
 
 				if(strcmp(destinationID, clientSensorID) == 0) {
 					printf("%s: Message from %s to %s successfully received.\n", clientSensorID, 
@@ -187,6 +201,74 @@ void* childThread(void* someArgument) {
 					}
 					else {
 						updatePosition(clientsd, clientSensorID, clientSensorRange, clientXPosition, clientYPosition);
+
+						// Should receive a REACHABLE message from the server
+						int updatebytes = recv(clientsd, buffer, BUFFER, 0);
+
+						if(updatebytes < 0) {
+							fprintf(stderr, "ERROR: Could not receive REACHABLE response from server!\n");
+							exit(1);
+						}
+						else if(updatebytes == 0) {
+							printf("Received no data. Server socket seems to have closed!\n");
+						}
+						else {
+							buffer[updatebytes] = '\0';
+							printf("Received from server: %s\n", buffer);
+
+							token = strtok(buffer, " ");
+							token = strtok(NULL, " ");
+
+							numReachable = atoi(token);
+							int value = 0;
+							ReachableList newEntry;
+
+							reachables = (ReachableList*)calloc(numReachable, sizeof(ReachableList));
+
+							token = strtok(NULL, " ");
+							while(token != NULL) {
+								if(value == 0) {
+									strcpy(newEntry.reachableID, token);
+									value = 1;
+								}
+								else if(value == 1) {
+									newEntry.xPosition = atoi(token);
+									value = 2;
+								}
+								else {
+									newEntry.yPosition = atoi(token);
+									value = 3;
+								}
+								if(value == 3) {
+									// Find the distance between the current client and the sensor/base
+									float distance = getDistance(clientXPosition, clientYPosition, 
+										newEntry.xPosition, newEntry.yPosition);
+
+									newEntry.distance = distance;
+
+									if(strstr(newEntry.reachableID, "base_station") == NULL) {
+										newEntry.isStation = 0;
+									}
+									else {
+										newEntry.isStation = 1;
+									}
+
+									reachables[reachableCounter++] = newEntry;
+									value = 0;
+								}
+								token = strtok(NULL, " ");
+							}
+
+							// Reset the reachable list counter
+							reachableCounter = 0;
+
+							// Debugging print statement
+							printf("Reachables:\n");
+							for(i=0; i<numReachable; i++) {
+								printf("\t%s %d %d\n", reachables[i].reachableID, reachables[i].xPosition,
+									reachables[i].yPosition);
+							}
+						}
 
 						// Implementing the WHERE message
 						char someID[BUFFER];
@@ -254,13 +336,22 @@ void* childThread(void* someArgument) {
 						int nextYPosition = 0;
 						char closest[BUFFER];
 						for(i=0; i<numReachable; i++) {
-							if(reachables[i].distanceFromDestination < minDistance) {
+							if(reachables[i].distanceFromDestination < minDistance &&
+								reachables[i].isStation) {
 								int found = 0;
 
-								for(j=0; j<hopReachable; j++) {
-									if(strcmp(reachables[i].reachableID, hopList[j].reachableID) == 0) {
-										found = 1;
-									}
+								// printf("PRINTING HOPLIST WITH LEN: %d\n", hopReachable);
+								// for(j=0; j<hopReachable; j++) {
+								// 	printf(" hoplist[%d]: %s\n", j, hopList[j].reachableID);
+								// 	if(strcmp(reachables[i].reachableID, hopList[j].reachableID) == 0) {
+								// 		found = 1;
+								// 	}
+								// }
+								if(strstr(hop_list, reachables[i].reachableID) != NULL){
+									printf("%s was in the hoplist.\n", reachables[i].reachableID);
+									found = 1;
+								} else {
+									printf("%s was not in the hoplist\n", reachables[i].reachableID);
 								}
 
 								if(!found) {
@@ -274,19 +365,22 @@ void* childThread(void* someArgument) {
 								}
 							}
 						}
+						// exit(1);
 
 						hopReachable++;
-						strcat(newHopList, closest);
-						sprintf(newHopList, "%s %d", newHopList, nextXPosition);
-						sprintf(newHopList, "%s %d", newHopList, nextYPosition);
+						// strcat(newHopList, closest);
+						// sprintf(newHopList, "%s %d", newHopList, nextXPosition);
+						// sprintf(newHopList, "%s %d", newHopList, nextYPosition);
 
 						printf("%s: Message from %s to %s being forwarded through %s\n", clientSensorID, 
 							originID, destinationID, clientSensorID);
 
+						sprintf(hop_list + strlen(hop_list), "%s ", clientSensorID);
+
 						// Send message to the CONTROL server
 						// Create the message that needs to be sent to the control server
-						sprintf(message, "DATAMESSAGE %s %s %s %d %s", originID, closest, destinationID, 
-							hopReachable, newHopList);
+						sprintf(message, "DATAMESSAGE %s %s %s %d %s ", originID, closest, destinationID, 
+							hopReachable, hop_list);
 
 						// Send the DATAMESSAGE to the server
 						bytes = send(clientsd, message, strlen(message), 0);
@@ -332,6 +426,14 @@ void* childThread(void* someArgument) {
 							newEntry.xPosition, newEntry.yPosition);
 
 						newEntry.distance = distance;
+
+						if(strstr(newEntry.reachableID, "base_station") == NULL) {
+							newEntry.isStation = 0;
+						}
+						else {
+							newEntry.isStation = 1;
+						}
+
 						reachables[reachableCounter++] = newEntry;
 						value = 0;
 					}
@@ -386,7 +488,8 @@ void* childThread(void* someArgument) {
 					float minDistance = INFINITY;
 					char closest[BUFFER];
 					for(i=0; i<numReachable; i++) {
-						if(reachables[i].distanceFromDestination < minDistance) {
+						if(reachables[i].distanceFromDestination < minDistance && 
+							reachables[i].isStation) {
 							minDistance = reachables[i].distance;
 							strcpy(closest, reachables[i].reachableID);
 						}
@@ -396,7 +499,7 @@ void* childThread(void* someArgument) {
 
 					// Send message to the CONTROL server
 					// Create the message that needs to be sent to the control server
-					sprintf(message, "DATAMESSAGE %s %s %s 1 %s", clientSensorID, closest, 
+					sprintf(message, "DATAMESSAGE %s %s %s 1 %s ", clientSensorID, closest, 
 						globalDestination, clientSensorID);
 
 
