@@ -1012,9 +1012,6 @@ BaseStation* getClosestValidLink(char* hoplist, int hoplist_len, char* destinati
 			if(closest_link == NULL || link_distance <= closest_link_distance){
 				//resolve tie by picking smaller id
 				if(link_distance == closest_link_distance){
-					printf("IN TIE.\n");
-					printf("link id: %s\n", link.id);
-					printf("closest link id: %s\n", closest_link->id);
 					if(link.id < closest_link->id)
 						closest_link = station_links[i];
 				}else{

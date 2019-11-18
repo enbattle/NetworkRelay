@@ -662,27 +662,28 @@ int main(int argc, char* argv[]) {
 
 			updatePosition(sd, sensorID, sensorRange, xPosition, yPosition);
 
-			while(finishedUpdating) {
-
-				// Send a WHERE message to get the destination coordinates
-				char someID[BUFFER];
-				strcpy(someID, token);
-
-				// Save destinationID as global destination
-				strcpy(globalDestination, someID);
-
-				sprintf(message, "WHERE %s", someID);
-				printf("ABOUT TO SEND WHERE MSG: %s\n", message);
-
-				// Send the WHERE message to the control server
-				int bytes = send(sd, message, strlen(message), 0);
-				if(bytes < strlen(message)) {
-					fprintf(stderr, "ERROR: Could not send WHERE message to server!\n");
-					return EXIT_FAILURE;
-				}
-				finishedUpdating = 0;
-				break;
+			while(!finishedUpdating) {
+				continue;
 			}
+
+			// Send a WHERE message to get the destination coordinates
+			char someID[BUFFER];
+			strcpy(someID, token);
+
+			// Save destinationID as global destination
+			strcpy(globalDestination, someID);
+
+			sprintf(message, "WHERE %s", someID);
+			printf("ABOUT TO SEND WHERE MSG: %s\n", message);
+
+			// Send the WHERE message to the control server
+			int bytes = send(sd, message, strlen(message), 0);
+			if(bytes < strlen(message)) {
+				fprintf(stderr, "ERROR: Could not send WHERE message to server!\n");
+				return EXIT_FAILURE;
+			}
+			
+			finishedUpdating = 0;
 
 			// CHILD THREAD HANDLES THE SENDING OF THE DATA MESSAGE
 		}
