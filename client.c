@@ -337,8 +337,8 @@ void* childThread(void* someArgument) {
 						// int nextYPosition = 0;
 						char closest[BUFFER];
 						for(i=0; i<numReachable; i++) {
-							if(reachables[i].distanceFromDestination < minDistance &&
-								reachables[i].isStation) {
+							// printf("This is the reachable id: %s\n", reachables[i].reachableID);
+							if(reachables[i].distanceFromDestination < minDistance) {
 								int found = 0;
 
 								// printf("PRINTING HOPLIST WITH LEN: %d\n", hopReachable);
@@ -458,6 +458,14 @@ void* childThread(void* someArgument) {
 				// }
 
 				finishedUpdating = 1;
+
+				//Send where command to get destination
+				if(parentSendData == 1){
+					char* where_msg = calloc(BUFFER, sizeof(char));
+					sprintf(where_msg, "WHERE  %s", globalDestination);
+					send(clientsd, where_msg, strlen(where_msg), 0);
+					free(where_msg);
+				}
 			}
 
 			else if(strcmp(token, "THERE") == 0) {
@@ -467,6 +475,8 @@ void* childThread(void* someArgument) {
 				else {
 					token = strtok(NULL, " ");
 					char message[BUFFER];
+					// char destination_id[BUFFER];
+					// strcpy(destination_id, token);
 
 					int destinationXPosition = 0;
 					int destinationYPosition = 0;
@@ -475,6 +485,7 @@ void* childThread(void* someArgument) {
 					// Get the coordinates of the destinationID
 					int value = 0;
 					// token = strtok
+					// printf("Received token: %s\n", token);
 					while(token != NULL) {
 						// printf("I'M IN THE WHILE LOOP\n");
 						 if(value == 1) {
@@ -501,18 +512,28 @@ void* childThread(void* someArgument) {
 					// Find the distances for all of the reachable bases/sensors
 					float minDistance = INFINITY;
 					char closest[BUFFER];
+					// printf("THIS IS THE DESTINATION POSITION: %d %d\n", destinationXPosition, destinationYPosition);
 					for(i=0; i<numReachable; i++) {
-						if(reachables[i].isStation && reachables[i].distanceFromDestination <= minDistance) {
+						// printf("ON CURRENT REACHABLE: %s\n", reachables[i].reachableID);
+						// printf("is isStation: %d\n", reachables[i].isStation);
+						// printf("strcmp globalDestination: %s to reachable id: %s = %d\n", 
+						// 	globalDestination, reachables[i].reachableID, strcmp(globalDestination,
+						// 		reachables[i].reachableID));
+						if(reachables[i].distanceFromDestination <= minDistance) {
 							//resolve ties by choosing smaller id
 							if(reachables[i].distanceFromDestination == minDistance){
-								if(strcmp(reachables[i].reachableID, closest) == -1)
+								if(strcmp(reachables[i].reachableID, closest) == -1){
 									strcpy(closest, reachables[i].reachableID);
+									// printf("IN EQUAL STATEMENT. FOUND NEW REACHABALE: %s\n", closest);
+								}
 							}else{
 									strcpy(closest, reachables[i].reachableID);
+									// printf("IN ELSE STATEMENT. FOUND NEW REACHABLE: %s\n", closest);
 							}
 							// printf("Found new min with id: %s and distance: %f\n", reachables[i].reachableID,
 								// reachables[i].distanceFromDestination);
 							minDistance = reachables[i].distanceFromDestination;
+							// printf("ADDED NEW MIN DISTANCE: %f\n", minDistance);
 						}
 					}
 
@@ -522,6 +543,8 @@ void* childThread(void* someArgument) {
 					// Create the message that needs to be sent to the control server
 					sprintf(message, "DATAMESSAGE %s %s %s 1 %s ", clientSensorID, closest, 
 						globalDestination, clientSensorID);
+
+					// printf("DATAMESSAGE: %s\n", message);
 
 					// printf("ABOUT TO SEND DATAMESSAGE: %s\n", message);
 
@@ -659,31 +682,32 @@ int main(int argc, char* argv[]) {
 
 			// Let child know that the parent wants to send data
 			parentSendData = 1;
+			strcpy(globalDestination, token);
 
 			updatePosition(sd, sensorID, sensorRange, xPosition, yPosition);
 
-			while(!finishedUpdating) {
-				continue;
-			}
+			// while(!finishedUpdating) {
+			// 	continue;
+			// }
 
-			// Send a WHERE message to get the destination coordinates
-			char someID[BUFFER];
-			strcpy(someID, token);
+			// // Send a WHERE message to get the destination coordinates
+			// char someID[BUFFER];
+			// strcpy(someID, token);
 
-			// Save destinationID as global destination
-			strcpy(globalDestination, someID);
+			// // Save destinationID as global destination
+			// strcpy(globalDestination, someID);
 
-			sprintf(message, "WHERE %s", someID);
-			// printf("ABOUT TO SEND WHERE MSG: %s\n", message);
+			// sprintf(message, "WHERE %s", someID);
+			// // printf("ABOUT TO SEND WHERE MSG: %s\n", message);
 
-			// Send the WHERE message to the control server
-			int bytes = send(sd, message, strlen(message), 0);
-			if(bytes < strlen(message)) {
-				fprintf(stderr, "ERROR: Could not send WHERE message to server!\n");
-				return EXIT_FAILURE;
-			}
+			// // Send the WHERE message to the control server
+			// int bytes = send(sd, message, strlen(message), 0);
+			// if(bytes < strlen(message)) {
+			// 	fprintf(stderr, "ERROR: Could not send WHERE message to server!\n");
+			// 	return EXIT_FAILURE;
+			// }
 
-			finishedUpdating = 0;
+			// finishedUpdating = 0;
 
 			// CHILD THREAD HANDLES THE SENDING OF THE DATA MESSAGE
 		}

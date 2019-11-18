@@ -109,7 +109,7 @@ Sensor* getSensor(char* id);
 bool stationIsInRange(BaseStation station, Sensor sensor);
 bool inHopList(char* id, char* hoplist, int hoplist_len);
 Client getClientBySensorID(char* sensor_id);
-bool destinationIsStation(char* destination_id);
+bool isstation(char* destination_id);
 void endServer();
 void closeAllSockets();
 void freeAllStations();
@@ -285,7 +285,7 @@ void handleSendData(char stdin_buffer[]){
 			dm_struct->destination_id = destination_id;
 			dm_struct->hoplist_len = 0;
 			dm_struct->hoplist = calloc(MAX_BUFFER, sizeof(char));
-			bool destination_is_station = destinationIsStation(destination_id);
+			bool destination_is_station = isstation(destination_id);
 
 			//send data message to closest station
 			handleMessageAsBaseStation(dm_struct, data_message, destination_is_station);
@@ -513,14 +513,28 @@ void handleDataMsg(char buffer[]){
 		num_reads++;
 		token = strtok(NULL, " ");
 	}
+
+	//format data message
 	char* data_message = calloc(MAX_BUFFER, sizeof(char));
 	sprintf(data_message, "DATAMESSAGE %s %s %s %d", dm_struct->origin_id, dm_struct->next_id,
 		dm_struct->destination_id, dm_struct->hoplist_len);
 	if(dm_struct->hoplist_len != 0)
 		sprintf(data_message + strlen(data_message), " %s", dm_struct->hoplist);
 	// printf("DataMessage: %s\n", data_message);
-	bool destination_is_station = destinationIsStation(dm_struct->destination_id);
-	handleMessageAsBaseStation(dm_struct, data_message, destination_is_station);
+	bool destination_is_station = isstation(dm_struct->destination_id);
+
+	// printf("data_message: %s\n", data_message);
+	// printf("destination_is_station: %d\n", destination_is_station);
+	// printf("strcmp dm_struct->next_id: %s, CONTROL == %d\n", dm_struct->next_id,
+	// 	strcmp(dm_struct->next_id, "CONTROL"));
+	// printf("This is the next id: %s\n", dm_struct->next_id);
+	if(!isstation(dm_struct->next_id)){
+		// printf("I'm sending straight to client\n");
+		Client target_cli = getClientBySensorID(dm_struct->next_id);
+		send(target_cli.fd, data_message, strlen(data_message), 0);
+	}else{
+		handleMessageAsBaseStation(dm_struct, data_message, destination_is_station);
+	}
 }
 
 void handleWhere(int fd, char buffer[]){
@@ -859,6 +873,9 @@ void handleMessageAsBaseStation(DataMessage* dm_struct, char* data_message, bool
 		return;
 	}
 
+	printf("%s: Message from %s to %s being forwarded through %s\n", station.id, dm_struct->origin_id, 
+		dm_struct->destination_id, station.id);
+
 	BaseStation destination_station;
 	Sensor destination_sensor;
 	if(destination_is_station)
@@ -916,9 +933,9 @@ void handleMessageAsBaseStation(DataMessage* dm_struct, char* data_message, bool
 			sprintf(data_message, "DATAMESSAGE  %s  %s  %s  %d  %s ", dm_struct->origin_id, 
 				dm_struct->next_id, dm_struct->destination_id, dm_struct->hoplist_len,
 				dm_struct->hoplist);
-			if(strcmp(dm_struct->next_id, dm_struct->destination_id) != 0)
-				printf("%s: Message from %s to %s being forwarded through %s\n", station.id, dm_struct->origin_id, 
-					dm_struct->destination_id, dm_struct->next_id);
+			// if(strcmp(dm_struct->next_id, dm_struct->destination_id) != 0)
+			// 	printf("%s: Message from %s to %s being forwarded through %s\n", dm_struct->next_id, dm_struct->origin_id, 
+			// 		dm_struct->destination_id, dm_struct->next_id);
 			handleMessageAsBaseStation(dm_struct, data_message, destination_is_station);
 
 		}else if(closest_sensor_distance < closest_link_distance){
@@ -937,6 +954,9 @@ void handleMessageAsBaseStation(DataMessage* dm_struct, char* data_message, bool
 			// printf("Client with fd %d is associated with sensor id: %s\n",
 			// 	target_cli.fd, target_cli.sensor_id );
 			// printf("Sending data message %s\n", data_message);
+			// if(strcmp(dm_struct->next_id, dm_struct->destination_id) != 0)
+			// 	printf("%s: Message from %s to %s being forwarded through %s\n", station.id, dm_struct->origin_id, 
+			// 		dm_struct->destination_id, station.id);
 			send(target_cli.fd, data_message, strlen(data_message), 0);
 
 		}else{
@@ -955,6 +975,9 @@ void handleMessageAsBaseStation(DataMessage* dm_struct, char* data_message, bool
 		// printf("Client with fd %d is associated with sensor id: %s\n",
 		// 	target_cli.fd, target_cli.sensor_id );
 		// printf("Sending data message %s\n", data_message);
+		// if(strcmp(dm_struct->next_id, dm_struct->destination_id) != 0)
+			// printf("%s: Message from %s to %s being forwarded through %s\n", station.id, dm_struct->origin_id, 
+			// 	dm_struct->destination_id, station.id);
 		send(target_cli.fd, data_message, strlen(data_message), 0);
 
 	}else if(closest_valid_link_ptr != NULL && closest_valid_sensor_ptr == NULL){
@@ -965,9 +988,9 @@ void handleMessageAsBaseStation(DataMessage* dm_struct, char* data_message, bool
 		sprintf(data_message, "DATAMESSAGE  %s  %s  %s  %d  %s ", dm_struct->origin_id, 
 			dm_struct->next_id, dm_struct->destination_id, dm_struct->hoplist_len,
 			dm_struct->hoplist);
-		if(strcmp(dm_struct->next_id, dm_struct->destination_id) != 0)
-			printf("%s: Message from %s to %s being forwarded through %s\n", station.id, dm_struct->origin_id, 
-				dm_struct->destination_id, dm_struct->next_id);
+		// if(strcmp(dm_struct->next_id, dm_struct->destination_id) != 0)
+			// printf("%s: Message from %s to %s being forwarded through %s\n", dm_struct->next_id, dm_struct->origin_id, 
+			// 	dm_struct->destination_id, dm_struct->next_id);
 		handleMessageAsBaseStation(dm_struct, data_message, destination_is_station);		
 
 	}else{
@@ -1086,12 +1109,12 @@ Sensor* getSensor(char* id){
 }
 
 bool stationIsInRange(BaseStation station, Sensor sensor){
-	int left_bound = sensor.x - (sensor.range / 2);
-	int right_bound = sensor.x + (sensor.range / 2);
-	int upper_bound = sensor.y + (sensor.range / 2);;
-	int lower_bound = sensor.y - (sensor.range / 2);
-	return (station.x >= left_bound && station.x <= right_bound
-		&& station.y >= lower_bound && station.y <= upper_bound);
+	// int left_bound = sensor.x - (sensor.range / 2);
+	// int right_bound = sensor.x + (sensor.range / 2);
+	// int upper_bound = sensor.y + (sensor.range / 2);
+	// int lower_bound = sensor.y - (sensor.range / 2);
+	float distance = getDistance(station.x, station.y, sensor.x, sensor.y);
+	return (sensor.range >= distance);
 }
 
 bool inHopList(char* id, char* hoplist, int hoplist_len){
@@ -1126,7 +1149,7 @@ Client getClientBySensorID(char* sensor_id){
 	exit(1);
 }
 
-bool destinationIsStation(char* destination_id){
+bool isstation(char* destination_id){
 	return (getBaseStation(destination_id) != NULL);
 }
 
