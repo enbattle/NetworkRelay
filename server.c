@@ -469,10 +469,9 @@ void* handleSensor(void* p){
 				handleDataMsg(buffer);
 
 			}
-
-			memset(buffer, 0, MAX_BUFFER);  
-
 		}
+
+		memset(buffer, 0, MAX_BUFFER);  
 	}
 
 	// Exit the current connection
@@ -520,6 +519,7 @@ void handleDataMsg(char buffer[]){
 }
 
 void handleWhere(int fd, char buffer[]){
+	printf("IN HANDLEWHERE. BUFFER: %s\n", buffer);
 	char* node_id = parseWhereMsg(buffer);
 
 	BaseStation* station_ptr = getBaseStation(node_id);
@@ -712,6 +712,7 @@ void sendThereMessage(int fd, char* node_id){
 		sprintf(there_msg, "THERE %s  %d  %d", node_id, station.x, station.y);
 	}
 
+	printf("ABOUT TO SEND THER MESSAGE: %s\n", there_msg);
 	send(fd, there_msg, strlen(there_msg), 0);
 	free(there_msg);
 }
