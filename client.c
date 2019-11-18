@@ -356,8 +356,12 @@ void* childThread(void* someArgument) {
 								}
 
 								if(!found) {
+									//resolve ties by choosing smaller id
+									if(minDistance == reachables[i].distance){
+										if(reachables[i].reachableID < closest)
+											strcpy(closest, reachables[i].reachableID);
+									}
 									minDistance = reachables[i].distance;
-									strcpy(closest, reachables[i].reachableID);
 									// nextXPosition = reachables[i].xPosition;
 									// nextYPosition = reachables[i].yPosition;
 								}
@@ -471,19 +475,15 @@ void* childThread(void* someArgument) {
 					// token = strtok
 					while(token != NULL) {
 						printf("I'M IN THE WHILE LOOP\n");
-						if(value == 0) {
-							value = 1;
-							continue;
-						}
-						else if(value == 1) {
-							printf("token: %s\n", token);
+						 if(value == 1) {
+							printf("token for destination x: %s\n", token);
 							sscanf(token, "%d", &destinationXPosition);  
-							value = 2;
 						}
-						else {
-							printf("token: %s\n", token);
+						else if(value == 2) {
+							printf("token for destination y: %s\n", token);
 							sscanf(token, "%d", &destinationYPosition);  
 						}
+						value++;
 						token = strtok(NULL, " ");
 					}
 
@@ -500,12 +500,15 @@ void* childThread(void* someArgument) {
 					float minDistance = INFINITY;
 					char closest[BUFFER];
 					for(i=0; i<numReachable; i++) {
-						if(reachables[i].distanceFromDestination < minDistance && 
-							reachables[i].isStation) {
+						if(reachables[i].isStation && reachables[i].distanceFromDestination <= minDistance) {
+							//resolve ties by choosing smaller id
+							if(reachables[i].distanceFromDestination == minDistance){
+								if(reachables[i].reachableID < closest)
+									strcpy(closest, reachables[i].reachableID);
+							}
 							printf("Found new min with id: %s and distance: %f\n", reachables[i].reachableID,
 								reachables[i].distanceFromDestination);
 							minDistance = reachables[i].distanceFromDestination;
-							strcpy(closest, reachables[i].reachableID);
 						}
 					}
 

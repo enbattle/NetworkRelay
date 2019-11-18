@@ -1001,7 +1001,7 @@ BaseStation* getClosestValidLink(char* hoplist, int hoplist_len, char* destinati
 	BaseStation station, BaseStation** station_links, BaseStation destination_station, Sensor destination_sensor){
 	BaseStation* closest_link = NULL;
 	BaseStation link;
-	float closest_link_distance, link_distance;
+	float closest_link_distance = INFINITY, link_distance;
 	for(int i = 0; i < station.num_links; i++){
 		link = *(station_links[i]);
 		// printf("	on iteration for link %s\n", link.id);
@@ -1009,9 +1009,16 @@ BaseStation* getClosestValidLink(char* hoplist, int hoplist_len, char* destinati
 			link_distance = getDistanceToStationOrSensor(link.x, link.y, destination_is_station,
 				destination_sensor, destination_station);
 
-			if(closest_link == NULL || link_distance < closest_link_distance){
+			if(closest_link == NULL || link_distance <= closest_link_distance){
+				//resolve tie by picking smaller id
+				if(link_distance == closest_link_distance){
+					printf("IN TIE.\n");
+					printf("link id: %s\n", link.id);
+					printf("closest link id: %s\n", closest_link->id);
+					if(link.id < closest_link->id)
+						closest_link = station_links[i];
+				}
 				closest_link_distance = link_distance;
-				closest_link = station_links[i];
 				// printf("Found new closest link: %s\n", closest_link->id);
 			}
 		}
@@ -1025,7 +1032,7 @@ BaseStation* getClosestValidLink(char* hoplist, int hoplist_len, char* destinati
 //the range of the sensor and the sensor is not in the hoplist
 Sensor* getClosestValidSensor(char* hoplist, int hoplist_len, char* destination_id, bool destination_is_station,
 	BaseStation station, BaseStation destination_station, Sensor destination_sensor){
-	float closest_sensor_distance, sensor_distance;
+	float closest_sensor_distance = INFINITY, sensor_distance;
 	Sensor* closest_sensor = NULL;
 	Sensor sensor;
 	for(int i = 0; i < num_sensors; i++){
@@ -1037,9 +1044,13 @@ Sensor* getClosestValidSensor(char* hoplist, int hoplist_len, char* destination_
 			// printf("hoplist_len: %d, inHopList returned %d for sensor %s\n",
 			//  hoplist_len, inHopList(sensor.id, hoplist, hoplist_len), sensor.id);
 
-			if(closest_sensor == NULL || sensor_distance < closest_sensor_distance){
+			if(closest_sensor == NULL || sensor_distance <= closest_sensor_distance){
+				//resolve ties by choosing smaller id
+				if(sensor_distance == closest_sensor_distance){
+					if(sensor.id < closest_sensor->id)
+						closest_sensor = &(sensors[i]);
+				}
 				closest_sensor_distance = sensor_distance;
-				closest_sensor = &(sensors[i]);
 		 		// printf("Just found new closest sensor with id: %s\n", closest_sensor->id);
 			}
 		}
