@@ -22,6 +22,7 @@ typedef struct {
 	char reachableID[BUFFER];
 	int xPosition;
 	int yPosition;
+	int isStation;
 	float distance;
 	float distanceFromDestination;
 } ReachableList;
@@ -254,7 +255,8 @@ void* childThread(void* someArgument) {
 						int nextYPosition = 0;
 						char closest[BUFFER];
 						for(i=0; i<numReachable; i++) {
-							if(reachables[i].distanceFromDestination < minDistance) {
+							if(reachables[i].distanceFromDestination < minDistance &&
+								reachables[i].isStation) {
 								int found = 0;
 
 								for(j=0; j<hopReachable; j++) {
@@ -332,6 +334,14 @@ void* childThread(void* someArgument) {
 							newEntry.xPosition, newEntry.yPosition);
 
 						newEntry.distance = distance;
+
+						if(strstr(newEntry.reachableID, "base_station") == NULL) {
+							newEntry.isStation = 0;
+						}
+						else {
+							newEntry.isStation = 1;
+						}
+
 						reachables[reachableCounter++] = newEntry;
 						value = 0;
 					}
@@ -386,7 +396,8 @@ void* childThread(void* someArgument) {
 					float minDistance = INFINITY;
 					char closest[BUFFER];
 					for(i=0; i<numReachable; i++) {
-						if(reachables[i].distanceFromDestination < minDistance) {
+						if(reachables[i].distanceFromDestination < minDistance && 
+							reachables[i].isStation) {
 							minDistance = reachables[i].distance;
 							strcpy(closest, reachables[i].reachableID);
 						}
